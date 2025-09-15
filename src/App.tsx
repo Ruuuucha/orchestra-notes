@@ -21,51 +21,65 @@ const newId = (prefix:string) => `${prefix}_${Math.random().toString(36).slice(2
 
 // 旧データ → 新データへマイグレーション
 function migrateShape(raw:any): AppState {
-  const base: AppState = raw?.concerts ? raw : DEFAULT_STATE
+  const base: AppState | any = raw?.concerts ? raw : DEFAULT_STATE
   const next: AppState = { concerts: [] }
 
-  for (const c of base.concerts ?? []) {
-    const nc: Concert = { id: c.id ?? newId('c'), title: c.title ?? 'Concert', pieces: [] }
-    for (const p of c.pieces ?? []) {
-      // 旧: p.notes[], 新: p.parts[].notes[]
-      let parts = p.parts
+  for (const c of (base.concerts ?? [])) {
+    const nc: Concert = {
+      id: c.id ?? newId('c'),
+      title: c.title ?? 'Concert',
+      pieces: []
+    }
+
+    for (const pAny of (c.pieces ?? [])) {
+      const p = pAny as any // ← ここを any として扱う
+
+      // 旧: p.notes[] / 新: p.parts[].notes[]
+      let parts = p.parts as any[] | undefined
       if (!parts) {
-        const oldNotes: Note[] = p.notes ?? []
-        const mapped = Array.from(ORCH_PARTS, (name)=>({
+        const oldNotes: Note[] = (p.notes ?? []) as Note[]  // ← p.notes に触れるのはここだけ
+        const mapped = Array.from(ORCH_PARTS, (name) => ({
           name,
-          notes: oldNotes.filter(n=> (n as any).part ? (n as any).part === name : false)
+          notes: oldNotes.filter((n: any) => n?.part ? n.part === name : false)
         }))
-        // 旧ノートに part 無しの場合は "Vn1" に寄せる
-        const rest = oldNotes.filter(n => !(n as any).part)
+        // 「part の無い旧ノート」は Vn1 に寄せる
+        const rest = oldNotes.filter((n: any) => !n?.part)
         if (rest.length) {
-          const vn1 = mapped.find(x=>x.name==='Vn1')
+          const vn1 = mapped.find(x => x.name === 'Vn1')
           if (vn1) vn1.notes.push(...rest)
         }
         parts = mapped
       } else {
-        // parts はあるが、ORCH_PARTS を満たすように補完
-        const names = new Set(parts.map((x:any)=>x.name))
+        // parts はあるが ORCH_PARTS を満たすよう補完
+        const names = new Set(parts.map((x:any) => x.name))
         for (const name of ORCH_PARTS) {
           if (!names.has(name)) parts.push({ name, notes: [] })
         }
       }
-      const np: Piece = { id: p.id ?? newId('p'), title: p.title ?? 'Piece', parts }
+
+      const np: Piece = {
+        id: p.id ?? newId('p'),
+        title: p.title ?? 'Piece',
+        parts: parts as any
+      }
       nc.pieces.push(np)
     }
-    // pieces が無ければ1つデフォルト作る
-    if (nc.pieces.length===0) {
+
+    if (nc.pieces.length === 0) {
       nc.pieces.push({
         id: newId('p'),
         title: '曲A（サンプル）',
         parts: Array.from(ORCH_PARTS, (name) => ({ name, notes: [] }))
       })
     }
+
     next.concerts.push(nc)
   }
-  // concerts 無ければデフォルト
-  if (next.concerts.length===0) next.concerts = DEFAULT_STATE.concerts
+
+  if (next.concerts.length === 0) next.concerts = DEFAULT_STATE.concerts
   return next
 }
+
 
 export default function App() {
   // ランディング/ゲスト
