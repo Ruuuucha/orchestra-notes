@@ -1,36 +1,76 @@
+// src/App.tsx
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabase'
 import Login from './components/Login'
 import Landing from './components/Landing'
 import ProfileGate from './components/ProfileGate'
 import InviteEditor from './components/InviteEditor'
-import Sidebar from './components/Sidebar'
-import CategoryPicker from './components/CategoryPicker'
-import PieceComments, { type PieceComment } from './components/PieceComments'
-import { ORCH_PARTS, DEFAULT_STATE, NOTE_TEMPLATES } from './constants'
+import SelectorBar from './components/SelectorBar'
+import NotesList from './components/NotesList'
+import {
+  ORCH_PARTS,
+  DEFAULT_STATE,
+  type AppState, type Concert, type Piece, type Note
+} from './constants'
 import './App.css'
 
-// ===== Types =====
-type Note = {
-  id: string
-  part: string
-  measureFrom: number
-  measureTo: number
-  text: string
-  categories: string[]
-  authorName?: string
-  authorEmail?: string
-  createdAt: string
+type Me = { userId:string; email:string; displayName:string }
+
+// ---- ユーティリティ ----
+const newId = (prefix:string) => `${prefix}_${Math.random().toString(36).slice(2,8)}_${Date.now()}`
+
+// 旧データ → 新データへマイグレーション
+function migrateShape(raw:any): AppState {
+  const base: AppState = raw?.concerts ? raw : DEFAULT_STATE
+  const next: AppState = { concerts: [] }
+
+  for (const c of base.concerts ?? []) {
+    const nc: Concert = { id: c.id ?? newId('c'), title: c.title ?? 'Concert', pieces: [] }
+    for (const p of c.pieces ?? []) {
+      // 旧: p.notes[], 新: p.parts[].notes[]
+      let parts = p.parts
+      if (!parts) {
+        const oldNotes: Note[] = p.notes ?? []
+        const mapped = Array.from(ORCH_PARTS, (name)=>({
+          name,
+          notes: oldNotes.filter(n=> (n as any).part ? (n as any).part === name : false)
+        }))
+        // 旧ノートに part 無しの場合は "Vn1" に寄せる
+        const rest = oldNotes.filter(n => !(n as any).part)
+        if (rest.length) {
+          const vn1 = mapped.find(x=>x.name==='Vn1')
+          if (vn1) vn1.notes.push(...rest)
+        }
+        parts = mapped
+      } else {
+        // parts はあるが、ORCH_PARTS を満たすように補完
+        const names = new Set(parts.map((x:any)=>x.name))
+        for (const name of ORCH_PARTS) {
+          if (!names.has(name)) parts.push({ name, notes: [] })
+        }
+      }
+      const np: Piece = { id: p.id ?? newId('p'), title: p.title ?? 'Piece', parts }
+      nc.pieces.push(np)
+    }
+    // pieces が無ければ1つデフォルト作る
+    if (nc.pieces.length===0) {
+      nc.pieces.push({
+        id: newId('p'),
+        title: '曲A（サンプル）',
+        parts: Array.from(ORCH_PARTS, (name) => ({ name, notes: [] }))
+      })
+    }
+    next.concerts.push(nc)
+  }
+  // concerts 無ければデフォルト
+  if (next.concerts.length===0) next.concerts = DEFAULT_STATE.concerts
+  return next
 }
-type Piece = { id:string; title:string; notes: Note[]; comments: PieceComment[] }
-type Concert = { id:string; title:string; pieces: Piece[] }
-type AppState = { concerts: Concert[] }
-type Me = { userId: string; email: string; displayName: string }
 
 export default function App() {
   // ランディング/ゲスト
   const [entered, setEntered] = useState(false)
-  const [guestName, setGuestName] = useState<string| null>(null)
+  const [guestName, setGuestName] = useState<string|null>(null)
 
   // 認証/プロフィール
   const [session, setSession] = useState<boolean | null>(null)
@@ -41,34 +81,38 @@ export default function App() {
   const [canEdit, setCanEdit] = useState(false)
   const [loading, setLoading] = useState(true)
 
-  // 選択中の演奏会/曲
-  const [selectedConcertId, setSelectedConcertId] = useState('c1')
-  const [selectedPieceId, setSelectedPieceId] = useState('p1')
+  // 選択
+  const [selectedConcertId, setSelectedConcertId] = useState<string>('c1')
+  const [selectedPieceId, setSelectedPieceId] = useState<string>('p1')
+  const [selectedPart, setSelectedPart] = useState<string>(ORCH_PARTS[0])
 
   // セッション監視（ゲストなら不要）
   useEffect(() => {
     if (guestName) return
     supabase.auth.getSession().then(({ data }) => setSession(!!data.session))
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, sess) =>
-      setSession(!!sess)
-    )
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, sess) => setSession(!!sess))
     return () => sub.subscription.unsubscribe()
   }, [guestName])
 
   // データ読み込み
   useEffect(() => {
     (async () => {
-      // ゲストでも読み取りOK
       setLoading(true)
-      const { data: s } = await supabase
-        .from('sets').select('data').eq('slug','default-sample').maybeSingle()
-      if (s?.data) setState(s.data as AppState)
-      else setState(DEFAULT_STATE)
+      const { data: s } = await supabase.from('sets')
+        .select('data').eq('slug','default-sample').maybeSingle()
+      const migrated = migrateShape(s?.data ?? DEFAULT_STATE)
+      setState(migrated)
 
-      // 編集判定（ログイン時のみ）
+      // 初期選択の整合
+      const c0 = migrated.concerts[0]
+      setSelectedConcertId(c0.id)
+      const p0 = c0.pieces[0]
+      setSelectedPieceId(p0.id)
+
+      // 権限判定（ログイン時のみ）
       if (me) {
-        const { data: editors } = await supabase
-          .from('allowed_editors').select('email').eq('set_slug','default-sample')
+        const { data: editors } = await supabase.from('allowed_editors')
+          .select('email').eq('set_slug','default-sample')
         setCanEdit(!!editors?.some(e => e.email === me.email))
       } else {
         setCanEdit(false)
@@ -85,6 +129,10 @@ export default function App() {
     () => currentConcert.pieces.find(p=>p.id===selectedPieceId) ?? currentConcert.pieces[0],
     [currentConcert, selectedPieceId]
   )
+  const currentPart = useMemo(
+    () => currentPiece.parts.find(pt=>pt.name===selectedPart) ?? currentPiece.parts[0],
+    [currentPiece, selectedPart]
+  )
 
   const saveState = async (next: AppState) => {
     setState(next)
@@ -93,40 +141,59 @@ export default function App() {
     if (error) alert(error.message)
   }
 
-  // ノート追加
+  // ノート追加（選択パートに）
   const addNote = async (partial: Omit<Note,'id'|'createdAt'|'authorName'|'authorEmail'>) => {
     if (!canEdit || !me) return
     const n: Note = {
       ...partial,
       id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
       authorName: me.displayName,
-      authorEmail: me.email
-    }
-    const next = structuredClone(state)
-    const piece = next.concerts
-      .find(c=>c.id===currentConcert.id)!.pieces
-      .find(p=>p.id===currentPiece.id)!
-    piece.notes.push(n)
-    await saveState(next)
-  }
-
-  // 曲コメント追加
-  const addPieceComment = async (text:string) => {
-    if (!canEdit || !me) return
-    const c: PieceComment = {
-      id: crypto.randomUUID(),
-      text,
-      authorName: me.displayName,
+      authorEmail: me.email,
       createdAt: new Date().toISOString()
     }
     const next = structuredClone(state)
-    const piece = next.concerts
-      .find(c=>c.id===currentConcert.id)!.pieces
-      .find(p=>p.id===currentPiece.id)!
-    if (!piece.comments) piece.comments = []
-    piece.comments.push(c)
+    const c = next.concerts.find(c=>c.id===currentConcert.id)!
+    const p = c.pieces.find(p=>p.id===currentPiece.id)!
+    const pt = p.parts.find(pt=>pt.name===selectedPart)!
+    pt.notes.push(n)
     await saveState(next)
+  }
+
+  // 演奏会追加（簡易）
+  const addConcert = async () => {
+    if (!canEdit) return
+    const title = window.prompt('演奏会名を入力')?.trim()
+    if (!title) return
+    const cId = newId('c')
+    const next = structuredClone(state)
+    next.concerts.push({
+      id: cId,
+      title,
+      pieces: [{
+        id: newId('p'),
+        title: '新しい曲',
+        parts: Array.from(ORCH_PARTS, (name)=>({ name, notes: [] }))
+      }]
+    })
+    await saveState(next)
+    setSelectedConcertId(cId)
+  }
+
+  // 曲追加（選択演奏会に）
+  const addPiece = async () => {
+    if (!canEdit) return
+    const title = window.prompt('曲名を入力')?.trim()
+    if (!title) return
+    const next = structuredClone(state)
+    const c = next.concerts.find(c=>c.id===currentConcert.id)!
+    const pId = newId('p')
+    c.pieces.push({
+      id: pId,
+      title,
+      parts: Array.from(ORCH_PARTS, (name)=>({ name, notes: [] }))
+    })
+    await saveState(next)
+    setSelectedPieceId(pId)
   }
 
   // ===== 画面分岐 =====
@@ -140,205 +207,72 @@ export default function App() {
   }
   if (guestName) {
     return (
-      <Shell
-        left={<Sidebar
+      <div className="min-h-screen bg-gradient-to-b from-orange-50 to-white">
+        <SelectorBar
           concerts={state.concerts}
           selectedConcertId={currentConcert.id}
           selectedPieceId={currentPiece.id}
-          onSelect={(cId,pId)=>{ setSelectedConcertId(cId); setSelectedPieceId(pId) }}
-        />}
-        right={<MainPane
-          title={`${currentConcert.title} / ${currentPiece.title}`}
-          displayName={`${guestName}（閲覧専用）`}
+          selectedPart={selectedPart}
+          onChangeConcert={setSelectedConcertId}
+          onChangePiece={setSelectedPieceId}
+          onChangePart={setSelectedPart}
+          onAddConcert={()=>{}}
+          onAddPiece={()=>{}}
           canEdit={false}
-          loading={loading}
-          piece={currentPiece}
-          onAddNote={()=>{}}
-          onAddPieceComment={()=>{}}
-        />}
-      />
+        />
+        <div className="max-w-5xl mx-auto p-4">
+          <Header title={`${currentConcert.title} / ${currentPiece.title}`} right={`${guestName}（閲覧専用）`} />
+          {loading ? <p>読み込み中…</p> : (
+            <NotesList notes={currentPart.notes} canEdit={false} onAdd={()=>{}} />
+          )}
+        </div>
+      </div>
     )
   }
   if (session === null) return null
   if (!session) return <Login />
   if (session && !me) {
-    return <ProfileGate onReady={(p)=>{
-      localStorage.setItem('displayName', p.displayName)
-      setMe(p)
-    }} />
+    return <ProfileGate onReady={(p)=>{ localStorage.setItem('displayName', p.displayName); setMe(p) }} />
   }
 
-  // ログイン済み
+  // ログイン済み（編集者判定込み）
   return (
-    <Shell
-      left={<Sidebar
+    <div className="min-h-screen bg-gradient-to-b from-orange-50 to-white">
+      <SelectorBar
         concerts={state.concerts}
         selectedConcertId={currentConcert.id}
         selectedPieceId={currentPiece.id}
-        onSelect={(cId,pId)=>{ setSelectedConcertId(cId); setSelectedPieceId(pId) }}
-      />}
-      right={<MainPane
-        title={`${currentConcert.title} / ${currentPiece.title}`}
-        displayName={`${me!.displayName}（${canEdit?'編集可':'閲覧専用'}）`}
+        selectedPart={selectedPart}
+        onChangeConcert={setSelectedConcertId}
+        onChangePiece={setSelectedPieceId}
+        onChangePart={setSelectedPart}
+        onAddConcert={addConcert}
+        onAddPiece={addPiece}
         canEdit={canEdit}
-        loading={loading}
-        piece={currentPiece}
-        onAddNote={(n)=>addNote(n)}
-        onAddPieceComment={(t)=>addPieceComment(t)}
-      />}
-    />
-  )
-}
-
-/* ===== レイアウト ===== */
-function Shell({ left, right }:{ left: React.ReactNode; right: React.ReactNode }) {
-  return (
-    <div className="min-h-screen flex">
-      {left}
-      <main className="flex-1 bg-gray-50">{right}</main>
-    </div>
-  )
-}
-
-/* ===== メインペイン ===== */
-function MainPane({
-  title, displayName, canEdit, loading, piece, onAddNote, onAddPieceComment
-}:{
-  title: string
-  displayName: string
-  canEdit: boolean
-  loading: boolean
-  piece: Piece
-  onAddNote: (n: Omit<Note,'id'|'createdAt'|'authorName'|'authorEmail'>)=>void
-  onAddPieceComment: (text:string)=>void
-}) {
-  return (
-    <div className="p-4 max-w-4xl mx-auto">
-      <header className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold">{title}</h1>
-          <p className="text-sm text-gray-500">Orchestra Notes</p>
-        </div>
-        <div className="text-sm text-gray-600">{displayName}</div>
-      </header>
-
-      {loading ? (
-        <p>読み込み中…</p>
-      ) : (
-        <>
-          {canEdit && <AddNoteForm onAdd={onAddNote} />}
-          <NotesList piece={piece} />
-          <PieceComments
-            comments={piece.comments ?? []}
-            canEdit={canEdit}
-            onAdd={onAddPieceComment}
-          />
-        </>
-      )}
-    </div>
-  )
-}
-
-/* ===== ノート一覧 ===== */
-function NotesList({ piece }:{ piece: Piece }) {
-  return (
-    <section className="mt-6 space-y-3">
-      <h3 className="font-semibold mb-2">ノート一覧</h3>
-      {piece.notes.length === 0 ? (
-        <p className="text-gray-500">まだノートはありません。</p>
-      ) : piece.notes.map(n => (
-        <article key={n.id} className="p-3 rounded-xl border bg-white">
-          <div className="flex items-center justify-between mb-1">
-            <div className="font-semibold">
-              {n.part} ｜ {n.measureFrom}–{n.measureTo}小節
-            </div>
-            <div className="text-xs text-gray-500">by {n.authorName}</div>
-          </div>
-          {n.categories?.length > 0 && (
-            <div className="mb-1 text-xs text-violet-700">
-              {n.categories.join(' / ')}
-            </div>
-          )}
-          <p className="whitespace-pre-wrap">{n.text}</p>
-        </article>
-      ))}
-    </section>
-  )
-}
-
-/* ===== ノート追加フォーム（カテゴリ付き） ===== */
-function AddNoteForm({
-  onAdd
-}:{ onAdd:(n: Omit<Note,'id'|'createdAt'|'authorName'|'authorEmail'>)=>void }) {
-  const [part, setPart] = useState<string>(ORCH_PARTS[0])
-  const [from, setFrom] = useState<number>(1)
-  const [to, setTo] = useState<number>(1)
-  const [text, setText] = useState<string>('')
-  const [categories, setCategories] = useState<string[]>([])
-
-  const submit = () => {
-    if (!text.trim()) return
-    onAdd({ part, measureFrom: from, measureTo: to, text, categories })
-    setText(''); setCategories([])
-  }
-
-  return (
-    <div className="p-4 rounded-2xl border bg-white">
-      <h3 className="font-semibold mb-2">ノート追加</h3>
-      <div className="flex flex-wrap gap-2 items-center">
-        <label className="text-sm">パート</label>
-        <select
-          className="border rounded px-2 py-1"
-          value={part}
-          onChange={e=>setPart(e.target.value)}
-        >
-          {ORCH_PARTS.map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
-        <label className="ml-3 text-sm">小節</label>
-        <input
-          type="number" min={1}
-          className="w-24 border rounded px-2 py-1"
-          value={from}
-          onChange={e=>setFrom(parseInt(e.target.value || '1'))}
-        />
-        <span>–</span>
-        <input
-          type="number" min={1}
-          className="w-24 border rounded px-2 py-1"
-          value={to}
-          onChange={e=>setTo(parseInt(e.target.value || '1'))}
-        />
-      </div>
-
-      <div className="mt-2">
-        <CategoryPicker value={categories} onChange={setCategories} />
-      </div>
-
-      {/* テンプレボタン（自由メモに即挿入） */}
-      <div className="mt-2 flex flex-wrap gap-2">
-        {NOTE_TEMPLATES.map(t => (
-          <button
-            type="button" key={t}
-            className="text-xs px-2 py-1 rounded border hover:bg-gray-50"
-            onClick={()=>setText(prev => (prev ? prev + '\n' + t : t))}
-          >
-            ＋ {t}
-          </button>
-        ))}
-      </div>
-
-      <textarea
-        className="mt-2 w-full border rounded px-3 py-2"
-        rows={3}
-        placeholder="自由メモ"
-        value={text}
-        onChange={e=>setText(e.target.value)}
       />
-      <div className="mt-2 text-right">
-        <button onClick={submit} className="rounded-xl px-4 py-2 bg-violet-600 text-white">
-          追加
-        </button>
+      <div className="max-w-5xl mx-auto p-4">
+        <Header title={`${currentConcert.title} / ${currentPiece.title}`} right={`${me!.displayName}（${canEdit?'編集可':'閲覧専用'}）`} />
+        {canEdit && (
+          <div className="mb-3">
+            <InviteEditor setSlug="default-sample" />
+          </div>
+        )}
+        {loading ? <p>読み込み中…</p> : (
+          <NotesList notes={currentPart.notes} canEdit={canEdit} onAdd={addNote} />
+        )}
       </div>
     </div>
+  )
+}
+
+function Header({ title, right }:{ title:string; right:string }) {
+  return (
+    <header className="flex items-center justify-between mb-4">
+      <div>
+        <h1 className="text-2xl font-bold text-orange-700">{title}</h1>
+        <p className="text-sm text-gray-600">Orchestra Notes</p>
+      </div>
+      <div className="text-sm text-gray-700">{right}</div>
+    </header>
   )
 }
