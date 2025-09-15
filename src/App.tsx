@@ -7,6 +7,7 @@ import ProfileGate from './components/ProfileGate'
 import InviteEditor from './components/InviteEditor'
 import SelectorBar from './components/SelectorBar'
 import NotesList from './components/NotesList'
+import EditorGate from './components/EditorGate'
 import {
   ORCH_PARTS,
   DEFAULT_STATE,
@@ -84,6 +85,7 @@ function migrateShape(raw:any): AppState {
 export default function App() {
   // ランディング/ゲスト
   const [entered, setEntered] = useState(false)
+  const [mode, setMode] = useState<'guest'|'editor'|null>(null)
   const [guestName, setGuestName] = useState<string|null>(null)
 
   // 認証/プロフィール
@@ -99,6 +101,14 @@ export default function App() {
   const [selectedConcertId, setSelectedConcertId] = useState<string>('c1')
   const [selectedPieceId, setSelectedPieceId] = useState<string>('p1')
   const [selectedPart, setSelectedPart] = useState<string>(ORCH_PARTS[0])
+
+  const envMissing = !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY
+  if (envMissing) {
+    return <div style={{padding:16}}>
+      <h3>設定エラー</h3>
+      <p>Supabase の環境変数が未設定です。管理者へ連絡してください。</p>
+    </div>
+  }
 
   // セッション監視（ゲストなら不要）
   useEffect(() => {
@@ -214,11 +224,23 @@ export default function App() {
   if (!entered) {
     return (
       <Landing
-        onEnter={() => setEntered(true)}
-        onGuest={(n)=>{ setGuestName(n); setEntered(true) }}
+        onEditor={()=>{ setMode('editor'); setEntered(true) }}
+        onGuest={(n)=>{ setMode('guest'); setGuestName(n); setEntered(true) }}
       />
     )
   }
+  // ===== 編集者入口（申請 or ログイン） =====
+  if (mode === 'editor' && !session) {
+    // まだログインしていない時は EditorGate を表示
+    return <EditorGate onDone={() => { setEntered(false); setMode(null) }} />
+  }
+  // ===== ゲスト入口 =====
+  if (mode === 'guest') {
+    // （あなたの現状のゲスト表示ロジックをそのまま）
+    // currentPart.notes を使った閲覧UI
+    // ...
+  }
+
   if (guestName) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-orange-50 to-white">
