@@ -1,15 +1,16 @@
-// src/components/NotesList.tsx
 import { useState } from 'react'
 import type { Note } from '../constants'
 
 export default function NotesList({
   notes,
   canEdit,
-  onAdd
+  onAdd,
+  onDelete
 }:{
   notes: Note[]
   canEdit: boolean
   onAdd: (n: Omit<Note,'id'|'createdAt'|'authorName'|'authorEmail'>)=>void
+  onDelete: (noteId: string)=>void   // 追加: コメント削除
 }) {
   const [from, setFrom] = useState(1)
   const [to, setTo] = useState(1)
@@ -50,7 +51,9 @@ export default function NotesList({
             <button
               onClick={add}
               className="px-4 py-2 rounded-xl bg-orange-500 text-white hover:bg-orange-600"
-            >追加</button>
+            >
+              追加
+            </button>
           </div>
         </div>
       )}
@@ -64,8 +67,20 @@ export default function NotesList({
               <div className="font-semibold text-orange-700">
                 {n.measureFrom}–{n.measureTo} 小節
               </div>
-              <div className="text-xs text-gray-500">
-                {n.authorName ?? '—'} / {new Date(n.createdAt).toLocaleString()}
+              <div className="flex items-center gap-2">
+                <div className="text-xs text-gray-500">
+                  {n.authorName ?? '—'} / {new Date(n.createdAt).toLocaleString()}
+                </div>
+                {canEdit && (
+                  <button
+                    onClick={()=>{
+                      if (window.confirm('このコメントを削除しますか？')) onDelete(n.id)
+                    }}
+                    className="px-2 py-1 text-xs rounded border border-red-400 text-red-600 hover:bg-red-50"
+                  >
+                    削除
+                  </button>
+                )}
               </div>
             </div>
             <p className="whitespace-pre-wrap">{n.text}</p>

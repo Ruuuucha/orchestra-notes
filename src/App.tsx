@@ -220,6 +220,42 @@ export default function App() {
     setSelectedPieceId(pId)
   }
 
+    // 演奏会削除
+  const deleteConcert = async (concertId:string) => {
+    if (!canEdit) return
+    const next = structuredClone(state)
+    next.concerts = next.concerts.filter(c=>c.id !== concertId)
+    await saveState(next)
+    // 残っているものを選択状態に
+    const c0 = next.concerts[0]
+    setSelectedConcertId(c0.id)
+    setSelectedPieceId(c0.pieces[0].id)
+  }
+
+  // 曲削除
+  const deletePiece = async (pieceId:string) => {
+    if (!canEdit) return
+    const next = structuredClone(state)
+    const concert = next.concerts.find(c=>c.id===currentConcert.id)!
+    concert.pieces = concert.pieces.filter(p=>p.id !== pieceId)
+    await saveState(next)
+    const p0 = concert.pieces[0]
+    setSelectedPieceId(p0.id)
+  }
+
+  // コメント削除
+  const deleteNote = async (noteId:string) => {
+    if (!canEdit) return
+    const next = structuredClone(state)
+    const part = next.concerts
+      .find(c=>c.id===currentConcert.id)!
+      .pieces.find(p=>p.id===currentPiece.id)!
+      .parts.find(pt=>pt.name===selectedPart)!
+    part.notes = part.notes.filter(n => n.id !== noteId)
+    await saveState(next)
+  }
+
+
   // ===== 画面分岐 =====
   if (!entered) {
     return (
@@ -254,12 +290,14 @@ export default function App() {
           onChangePart={setSelectedPart}
           onAddConcert={()=>{}}
           onAddPiece={()=>{}}
+          onDeleteConcert={deleteConcert}
+          onDeletePiece={deletePiece}  
           canEdit={false}
         />
         <div className="max-w-5xl mx-auto p-4">
           <Header title={`${currentConcert.title} / ${currentPiece.title}`} right={`${guestName}（閲覧専用）`} />
           {loading ? <p>読み込み中…</p> : (
-            <NotesList notes={currentPart.notes} canEdit={false} onAdd={()=>{}} />
+            <NotesList notes={currentPart.notes} canEdit={false} onAdd={()=>{}} onDelete={deleteNote} />
           )}
         </div>
       </div>
@@ -284,6 +322,8 @@ export default function App() {
         onChangePart={setSelectedPart}
         onAddConcert={addConcert}
         onAddPiece={addPiece}
+        onDeleteConcert={deleteConcert}
+        onDeletePiece={deletePiece}  
         canEdit={canEdit}
       />
       <div className="max-w-5xl mx-auto p-4">
@@ -294,7 +334,7 @@ export default function App() {
           </div>
         )}
         {loading ? <p>読み込み中…</p> : (
-          <NotesList notes={currentPart.notes} canEdit={canEdit} onAdd={addNote} />
+          <NotesList notes={currentPart.notes} canEdit={canEdit} onAdd={addNote} onDelete={deleteNote} />
         )}
       </div>
     </div>
