@@ -4,28 +4,35 @@ import Login from './components/Login'
 import Landing from './components/Landing'
 import ProfileGate from './components/ProfileGate'
 import InviteEditor from './components/InviteEditor'
-import { ORCH_PARTS, DEFAULT_STATE } from './constants'
+import Sidebar from './components/Sidebar'
+import CategoryPicker from './components/CategoryPicker'
+import PieceComments, { type PieceComment } from './components/PieceComments'
+import { ORCH_PARTS, DEFAULT_STATE, NOTE_TEMPLATES } from './constants'
 import './App.css'
 
+// ===== Types =====
 type Note = {
   id: string
   part: string
   measureFrom: number
   measureTo: number
   text: string
-  authorName?: string      // 表示用
-  authorEmail?: string     // 権限判定のみ
+  categories: string[]
+  authorName?: string
+  authorEmail?: string
   createdAt: string
 }
-type Piece = { id:string; title:string; notes: Note[] }
+type Piece = { id:string; title:string; notes: Note[]; comments: PieceComment[] }
 type Concert = { id:string; title:string; pieces: Piece[] }
 type AppState = { concerts: Concert[] }
 type Me = { userId: string; email: string; displayName: string }
 
 export default function App() {
-  // 画面制御
-  const [entered, setEntered] = useState(false)          // ランディング→本体へ
-  const [guestName, setGuestName] = useState<string| null>(null) // ゲスト閲覧モード
+  // ランディング/ゲスト
+  const [entered, setEntered] = useState(false)
+  const [guestName, setGuestName] = useState<string| null>(null)
+
+  // 認証/プロフィール
   const [session, setSession] = useState<boolean | null>(null)
   const [me, setMe] = useState<Me | null>(null)
 
@@ -34,7 +41,11 @@ export default function App() {
   const [canEdit, setCanEdit] = useState(false)
   const [loading, setLoading] = useState(true)
 
-  // セッション監視（ゲストモード時は不要）
+  // 選択中の演奏会/曲
+  const [selectedConcertId, setSelectedConcertId] = useState('c1')
+  const [selectedPieceId, setSelectedPieceId] = useState('p1')
+
+  // セッション監視（ゲストなら不要）
   useEffect(() => {
     if (guestName) return
     supabase.auth.getSession().then(({ data }) => setSession(!!data.session))
@@ -47,44 +58,42 @@ export default function App() {
   // データ読み込み
   useEffect(() => {
     (async () => {
-      if (!me && !guestName) { setLoading(false); return }
+      // ゲストでも読み取りOK
       setLoading(true)
-
-      // sets を取得（ゲストも読み取りOK）
       const { data: s } = await supabase
-        .from('sets')
-        .select('data')
-        .eq('slug','default-sample')
-        .maybeSingle()
+        .from('sets').select('data').eq('slug','default-sample').maybeSingle()
       if (s?.data) setState(s.data as AppState)
       else setState(DEFAULT_STATE)
 
-      // 編集権限判定（ログイン時のみ）
+      // 編集判定（ログイン時のみ）
       if (me) {
         const { data: editors } = await supabase
-          .from('allowed_editors')
-          .select('email')
-          .eq('set_slug','default-sample')
+          .from('allowed_editors').select('email').eq('set_slug','default-sample')
         setCanEdit(!!editors?.some(e => e.email === me.email))
       } else {
         setCanEdit(false)
       }
-
       setLoading(false)
     })()
   }, [me, guestName])
 
-  const piece = useMemo(() => state.concerts[0].pieces[0], [state])
+  const currentConcert = useMemo(
+    () => state.concerts.find(c=>c.id===selectedConcertId) ?? state.concerts[0],
+    [state, selectedConcertId]
+  )
+  const currentPiece = useMemo(
+    () => currentConcert.pieces.find(p=>p.id===selectedPieceId) ?? currentConcert.pieces[0],
+    [currentConcert, selectedPieceId]
+  )
 
   const saveState = async (next: AppState) => {
     setState(next)
-    const { error } = await supabase
-      .from('sets')
-      .update({ data: next })
-      .eq('slug','default-sample')
+    const { error } = await supabase.from('sets')
+      .update({ data: next }).eq('slug','default-sample')
     if (error) alert(error.message)
   }
 
+  // ノート追加
   const addNote = async (partial: Omit<Note,'id'|'createdAt'|'authorName'|'authorEmail'>) => {
     if (!canEdit || !me) return
     const n: Note = {
@@ -92,10 +101,31 @@ export default function App() {
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
       authorName: me.displayName,
-      authorEmail: me.email,
+      authorEmail: me.email
     }
     const next = structuredClone(state)
-    next.concerts[0].pieces[0].notes.push(n)
+    const piece = next.concerts
+      .find(c=>c.id===currentConcert.id)!.pieces
+      .find(p=>p.id===currentPiece.id)!
+    piece.notes.push(n)
+    await saveState(next)
+  }
+
+  // 曲コメント追加
+  const addPieceComment = async (text:string) => {
+    if (!canEdit || !me) return
+    const c: PieceComment = {
+      id: crypto.randomUUID(),
+      text,
+      authorName: me.displayName,
+      createdAt: new Date().toISOString()
+    }
+    const next = structuredClone(state)
+    const piece = next.concerts
+      .find(c=>c.id===currentConcert.id)!.pieces
+      .find(p=>p.id===currentPiece.id)!
+    if (!piece.comments) piece.comments = []
+    piece.comments.push(c)
     await saveState(next)
   }
 
@@ -104,115 +134,116 @@ export default function App() {
     return (
       <Landing
         onEnter={() => setEntered(true)}
-        onGuest={(n) => { setGuestName(n); setEntered(true) }}
+        onGuest={(n)=>{ setGuestName(n); setEntered(true) }}
       />
     )
   }
-
-  // ゲスト閲覧モード
   if (guestName) {
     return (
-      <Viewer
-        displayName={guestName}
-        piece={piece}
-        loading={loading}
+      <Shell
+        left={<Sidebar
+          concerts={state.concerts}
+          selectedConcertId={currentConcert.id}
+          selectedPieceId={currentPiece.id}
+          onSelect={(cId,pId)=>{ setSelectedConcertId(cId); setSelectedPieceId(pId) }}
+        />}
+        right={<MainPane
+          title={`${currentConcert.title} / ${currentPiece.title}`}
+          displayName={`${guestName}（閲覧専用）`}
+          canEdit={false}
+          loading={loading}
+          piece={currentPiece}
+          onAddNote={()=>{}}
+          onAddPieceComment={()=>{}}
+        />}
       />
     )
   }
-
-  // ログインフロー
   if (session === null) return null
   if (!session) return <Login />
   if (session && !me) {
-    return (
-      <ProfileGate onReady={(p) => {
-        localStorage.setItem('displayName', p.displayName)
-        setMe(p)
-      }}/>
-    )
+    return <ProfileGate onReady={(p)=>{
+      localStorage.setItem('displayName', p.displayName)
+      setMe(p)
+    }} />
   }
 
-  // ログイン済み本体UI
+  // ログイン済み
   return (
-    <Editor
-      me={me!}
-      canEdit={canEdit}
-      loading={loading}
-      piece={piece}
-      addNote={addNote}
+    <Shell
+      left={<Sidebar
+        concerts={state.concerts}
+        selectedConcertId={currentConcert.id}
+        selectedPieceId={currentPiece.id}
+        onSelect={(cId,pId)=>{ setSelectedConcertId(cId); setSelectedPieceId(pId) }}
+      />}
+      right={<MainPane
+        title={`${currentConcert.title} / ${currentPiece.title}`}
+        displayName={`${me!.displayName}（${canEdit?'編集可':'閲覧専用'}）`}
+        canEdit={canEdit}
+        loading={loading}
+        piece={currentPiece}
+        onAddNote={(n)=>addNote(n)}
+        onAddPieceComment={(t)=>addPieceComment(t)}
+      />}
     />
   )
 }
 
-/* ===== サブコンポーネント ===== */
-
-// 閲覧専用ビュー
-function Viewer({ displayName, piece, loading }:{
-  displayName: string
-  piece: Piece
-  loading: boolean
-}) {
+/* ===== レイアウト ===== */
+function Shell({ left, right }:{ left: React.ReactNode; right: React.ReactNode }) {
   return (
-    <div className="p-4 max-w-4xl mx-auto">
-      <header className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold">Default-Sample</h1>
-          <p className="text-sm text-gray-500">Orchestra Notes</p>
-        </div>
-        <div className="text-sm text-gray-600">{displayName}（閲覧専用）</div>
-      </header>
-
-      {loading ? (
-        <p>読み込み中…</p>
-      ) : (
-        <NotesList piece={piece} />
-      )}
+    <div className="min-h-screen flex">
+      {left}
+      <main className="flex-1 bg-gray-50">{right}</main>
     </div>
   )
 }
 
-// 編集者ビュー
-function Editor({ me, canEdit, loading, piece, addNote }:{
-  me: Me
+/* ===== メインペイン ===== */
+function MainPane({
+  title, displayName, canEdit, loading, piece, onAddNote, onAddPieceComment
+}:{
+  title: string
+  displayName: string
   canEdit: boolean
   loading: boolean
   piece: Piece
-  addNote: (p: Omit<Note,'id'|'createdAt'|'authorName'|'authorEmail'>) => void
+  onAddNote: (n: Omit<Note,'id'|'createdAt'|'authorName'|'authorEmail'>)=>void
+  onAddPieceComment: (text:string)=>void
 }) {
   return (
     <div className="p-4 max-w-4xl mx-auto">
       <header className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-bold">Default-Sample</h1>
+          <h1 className="text-2xl font-bold">{title}</h1>
           <p className="text-sm text-gray-500">Orchestra Notes</p>
         </div>
-        <div className="text-sm text-gray-600">
-          {me.displayName}（{canEdit ? '編集可' : '閲覧専用'}）
-        </div>
+        <div className="text-sm text-gray-600">{displayName}</div>
       </header>
 
       {loading ? (
         <p>読み込み中…</p>
       ) : (
         <>
-          {canEdit && (
-            <div className="mb-4">
-              <InviteEditor setSlug="default-sample" />
-            </div>
-          )}
-          {canEdit && <AddNoteForm onAdd={addNote} />}
+          {canEdit && <AddNoteForm onAdd={onAddNote} />}
           <NotesList piece={piece} />
+          <PieceComments
+            comments={piece.comments ?? []}
+            canEdit={canEdit}
+            onAdd={onAddPieceComment}
+          />
         </>
       )}
     </div>
   )
 }
 
-// ノート一覧
+/* ===== ノート一覧 ===== */
 function NotesList({ piece }:{ piece: Piece }) {
   return (
     <section className="mt-6 space-y-3">
-      <h2 className="font-semibold mb-2">ノート一覧</h2>
+      <h3 className="font-semibold mb-2">ノート一覧</h3>
       {piece.notes.length === 0 ? (
         <p className="text-gray-500">まだノートはありません。</p>
       ) : piece.notes.map(n => (
@@ -223,6 +254,11 @@ function NotesList({ piece }:{ piece: Piece }) {
             </div>
             <div className="text-xs text-gray-500">by {n.authorName}</div>
           </div>
+          {n.categories?.length > 0 && (
+            <div className="mb-1 text-xs text-violet-700">
+              {n.categories.join(' / ')}
+            </div>
+          )}
           <p className="whitespace-pre-wrap">{n.text}</p>
         </article>
       ))}
@@ -230,19 +266,20 @@ function NotesList({ piece }:{ piece: Piece }) {
   )
 }
 
-// ノート追加フォーム
-function AddNoteForm({ onAdd }:{
-  onAdd:(p: Omit<Note,'id'|'createdAt'|'authorName'|'authorEmail'>)=>void
-}) {
+/* ===== ノート追加フォーム（カテゴリ付き） ===== */
+function AddNoteForm({
+  onAdd
+}:{ onAdd:(n: Omit<Note,'id'|'createdAt'|'authorName'|'authorEmail'>)=>void }) {
   const [part, setPart] = useState<string>(ORCH_PARTS[0])
   const [from, setFrom] = useState<number>(1)
   const [to, setTo] = useState<number>(1)
   const [text, setText] = useState<string>('')
+  const [categories, setCategories] = useState<string[]>([])
 
   const submit = () => {
     if (!text.trim()) return
-    onAdd({ part, measureFrom: from, measureTo: to, text })
-    setText('')
+    onAdd({ part, measureFrom: from, measureTo: to, text, categories })
+    setText(''); setCategories([])
   }
 
   return (
@@ -272,6 +309,24 @@ function AddNoteForm({ onAdd }:{
           onChange={e=>setTo(parseInt(e.target.value || '1'))}
         />
       </div>
+
+      <div className="mt-2">
+        <CategoryPicker value={categories} onChange={setCategories} />
+      </div>
+
+      {/* テンプレボタン（自由メモに即挿入） */}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {NOTE_TEMPLATES.map(t => (
+          <button
+            type="button" key={t}
+            className="text-xs px-2 py-1 rounded border hover:bg-gray-50"
+            onClick={()=>setText(prev => (prev ? prev + '\n' + t : t))}
+          >
+            ＋ {t}
+          </button>
+        ))}
+      </div>
+
       <textarea
         className="mt-2 w-full border rounded px-3 py-2"
         rows={3}
@@ -280,10 +335,7 @@ function AddNoteForm({ onAdd }:{
         onChange={e=>setText(e.target.value)}
       />
       <div className="mt-2 text-right">
-        <button
-          onClick={submit}
-          className="rounded-xl px-4 py-2 bg-violet-600 text-white"
-        >
+        <button onClick={submit} className="rounded-xl px-4 py-2 bg-violet-600 text-white">
           追加
         </button>
       </div>
