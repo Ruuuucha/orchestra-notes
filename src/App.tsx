@@ -193,7 +193,7 @@ export default function App() {
     }
   }
 
-  // ====== 追加/編集/削除 ロジック ======
+  // ====== 追加/編集/削除/並び替え ロジック ======
 
   // ノート追加（選択パート）
   const addNote = async (
@@ -339,6 +339,36 @@ export default function App() {
     setSelectedPart(ORCH_PARTS[0])
   }
 
+  // 並び替え：演奏会
+  const reorderConcert = async (concertId: string, dir: 'up'|'down') => {
+    if (!canEdit) return
+    const next = structuredClone(state)
+    const idx = next.concerts.findIndex(c=>c.id===concertId)
+    if (idx === -1) return
+    const to = dir === 'up' ? idx - 1 : idx + 1
+    if (to < 0 || to >= next.concerts.length) return
+    const [moved] = next.concerts.splice(idx, 1)
+    next.concerts.splice(to, 0, moved)
+    await saveState(next)
+    // 選択は同じIDのまま有効
+  }
+
+  // 並び替え：曲（選択演奏会内）
+  const reorderPiece = async (pieceId: string, dir: 'up'|'down') => {
+    if (!canEdit) return
+    const next = structuredClone(state)
+    const c = next.concerts.find(c=>c.id===currentConcert.id)
+    if (!c) return
+    const idx = c.pieces.findIndex(p=>p.id===pieceId)
+    if (idx === -1) return
+    const to = dir === 'up' ? idx - 1 : idx + 1
+    if (to < 0 || to >= c.pieces.length) return
+    const [moved] = c.pieces.splice(idx, 1)
+    c.pieces.splice(to, 0, moved)
+    await saveState(next)
+    // 選択は同じIDのまま有効
+  }
+
   // ================= 画面分岐 =================
 
   // 入口（まだ選択していない）
@@ -381,6 +411,8 @@ export default function App() {
           onRenamePiece={() => {}}
           onDeleteConcert={() => {}}
           onDeletePiece={() => {}}
+          onReorderConcert={() => {}}
+          onReorderPiece={() => {}}
           canEdit={false}
         />
         <div className="max-w-5xl mx-auto p-4">
@@ -433,6 +465,8 @@ export default function App() {
         onRenamePiece={renamePiece}
         onDeleteConcert={deleteConcert}
         onDeletePiece={deletePiece}
+        onReorderConcert={reorderConcert}
+        onReorderPiece={reorderPiece}
         canEdit={canEdit}
       />
       <div className="max-w-5xl mx-auto p-4">

@@ -14,6 +14,8 @@ export default function SelectorBar({
   onRenamePiece,
   onDeleteConcert,
   onDeletePiece,
+  onReorderConcert,  // 追加: 並び替え（演奏会）
+  onReorderPiece,    // 追加: 並び替え（曲）
   canEdit
 }:{
   concerts: Concert[]
@@ -29,6 +31,8 @@ export default function SelectorBar({
   onRenamePiece: (id: string, title: string)=>void
   onDeleteConcert: (id: string)=>void
   onDeletePiece: (id: string)=>void
+  onReorderConcert: (id: string, dir: 'up'|'down')=>void
+  onReorderPiece: (id: string, dir: 'up'|'down')=>void
   canEdit: boolean
 }) {
   const selectedConcert = concerts.find(c=>c.id===selectedConcertId) ?? concerts[0]
@@ -45,6 +49,9 @@ export default function SelectorBar({
     if (title) onRenamePiece(selectedPieceId, title)
   }
 
+  const idxConcert = Math.max(0, concerts.findIndex(c=>c.id===selectedConcertId))
+  const idxPiece = Math.max(0, pieces.findIndex(p=>p.id===selectedPieceId))
+
   return (
     <div className="w-full sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
       <div className="max-w-5xl mx-auto p-3 flex flex-wrap items-center gap-2">
@@ -59,6 +66,7 @@ export default function SelectorBar({
             <option key={c.id} value={c.id}>{c.title}</option>
           ))}
         </select>
+
         {canEdit && (
           <>
             <button
@@ -67,6 +75,23 @@ export default function SelectorBar({
             >
               ＋演奏会
             </button>
+
+            {/* 並び替え（演奏会） */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={()=>onReorderConcert(selectedConcertId, 'up')}
+                disabled={idxConcert<=0}
+                className={`px-2 py-2 rounded-xl border ${idxConcert<=0 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-orange-50'}`}
+                title="上へ"
+              >↑</button>
+              <button
+                onClick={()=>onReorderConcert(selectedConcertId, 'down')}
+                disabled={idxConcert>=concerts.length-1}
+                className={`px-2 py-2 rounded-xl border ${idxConcert>=concerts.length-1 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-orange-50'}`}
+                title="下へ"
+              >↓</button>
+            </div>
+
             <button
               onClick={promptRenameConcert}
               className="px-3 py-2 rounded-xl border text-orange-700 border-orange-300 hover:bg-orange-50"
@@ -97,6 +122,7 @@ export default function SelectorBar({
             <option key={p.id} value={p.id}>{p.title}</option>
           ))}
         </select>
+
         {canEdit && (
           <>
             <button
@@ -105,6 +131,23 @@ export default function SelectorBar({
             >
               ＋曲
             </button>
+
+            {/* 並び替え（曲） */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={()=>onReorderPiece(selectedPieceId, 'up')}
+                disabled={idxPiece<=0}
+                className={`px-2 py-2 rounded-xl border ${idxPiece<=0 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-orange-50'}`}
+                title="上へ"
+              >↑</button>
+              <button
+                onClick={()=>onReorderPiece(selectedPieceId, 'down')}
+                disabled={idxPiece>=pieces.length-1}
+                className={`px-2 py-2 rounded-xl border ${idxPiece>=pieces.length-1 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-orange-50'}`}
+                title="下へ"
+              >↓</button>
+            </div>
+
             <button
               onClick={promptRenamePiece}
               className="px-3 py-2 rounded-xl border text-orange-700 border-orange-300 hover:bg-orange-50"
