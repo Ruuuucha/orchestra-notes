@@ -12,8 +12,8 @@ export default function Login() {
 
     // 本番は GitHub Pages のサブパスに合わせる
     const redirectTo = import.meta.env.DEV
-      ? 'http://localhost:5173'
-      : 'https://ruuuucha.github.io/orchestra-notes'
+      ? 'http://localhost:5173/'
+      : 'https://ruuuucha.github.io/orchestra-notes/'
 
     try {
       const { error } = await supabase.auth.signInWithOtp({
