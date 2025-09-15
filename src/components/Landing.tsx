@@ -31,7 +31,7 @@ export default function Landing({
 
           <input
             className="w-full border rounded-xl px-3 py-2"
-            placeholder="表示名（例: たむら）"
+            placeholder="表示名（例: hanako yamada）"
             value={name}
             onChange={e=>setName(e.target.value)}
           />

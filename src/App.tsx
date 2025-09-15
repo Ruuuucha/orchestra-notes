@@ -1,58 +1,60 @@
-// src/App.tsx
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabase'
-import Login from './components/Login'
 import Landing from './components/Landing'
+import EditorGate from './components/EditorGate'
+import Login from './components/Login'
 import ProfileGate from './components/ProfileGate'
-import InviteEditor from './components/InviteEditor'
 import SelectorBar from './components/SelectorBar'
 import NotesList from './components/NotesList'
-import EditorGate from './components/EditorGate'
 import {
   ORCH_PARTS,
   DEFAULT_STATE,
-  type AppState, type Concert, type Piece, type Note
+  type AppState,
+  type Concert,
+  type Piece,
+  type Note
 } from './constants'
 import './App.css'
 
-type Me = { userId:string; email:string; displayName:string }
+type Me = { userId: string; email: string; displayName: string }
 
-// ---- ユーティリティ ----
-const newId = (prefix:string) => `${prefix}_${Math.random().toString(36).slice(2,8)}_${Date.now()}`
+const SET_SLUG = 'default-sample'
+const newId = (prefix: string) =>
+  `${prefix}_${Math.random().toString(36).slice(2, 8)}_${Date.now()}`
 
-// 旧データ → 新データへマイグレーション
-function migrateShape(raw:any): AppState {
+// 旧データ（piece.notes）→ 新データ（piece.parts[].notes）へマイグレーション
+function migrateShape(raw: any): AppState {
   const base: AppState | any = raw?.concerts ? raw : DEFAULT_STATE
   const next: AppState = { concerts: [] }
 
-  for (const c of (base.concerts ?? [])) {
+  for (const c of base.concerts ?? []) {
     const nc: Concert = {
       id: c.id ?? newId('c'),
       title: c.title ?? 'Concert',
       pieces: []
     }
 
-    for (const pAny of (c.pieces ?? [])) {
-      const p = pAny as any // ← ここを any として扱う
+    for (const pAny of c.pieces ?? []) {
+      const p = pAny as any
 
-      // 旧: p.notes[] / 新: p.parts[].notes[]
       let parts = p.parts as any[] | undefined
       if (!parts) {
-        const oldNotes: Note[] = (p.notes ?? []) as Note[]  // ← p.notes に触れるのはここだけ
+        // 旧形式: piece.notes に入っていたものをパートへ仕分け
+        const oldNotes: Note[] = (p.notes ?? []) as Note[]
         const mapped = Array.from(ORCH_PARTS, (name) => ({
           name,
-          notes: oldNotes.filter((n: any) => n?.part ? n.part === name : false)
+          notes: oldNotes.filter((n: any) => (n?.part ? n.part === name : false))
         }))
-        // 「part の無い旧ノート」は Vn1 に寄せる
+        // part 無しの旧ノートは Vn1 に寄せる
         const rest = oldNotes.filter((n: any) => !n?.part)
         if (rest.length) {
-          const vn1 = mapped.find(x => x.name === 'Vn1')
+          const vn1 = mapped.find((x) => x.name === 'Vn1')
           if (vn1) vn1.notes.push(...rest)
         }
         parts = mapped
       } else {
-        // parts はあるが ORCH_PARTS を満たすよう補完
-        const names = new Set(parts.map((x:any) => x.name))
+        // parts がある場合は ORCH_PARTS を満たすように足りないパートを補完
+        const names = new Set(parts.map((x: any) => x.name))
         for (const name of ORCH_PARTS) {
           if (!names.has(name)) parts.push({ name, notes: [] })
         }
@@ -69,11 +71,10 @@ function migrateShape(raw:any): AppState {
     if (nc.pieces.length === 0) {
       nc.pieces.push({
         id: newId('p'),
-        title: '曲A（サンプル）',
+        title: '新しい曲',
         parts: Array.from(ORCH_PARTS, (name) => ({ name, notes: [] }))
       })
     }
-
     next.concerts.push(nc)
   }
 
@@ -81,14 +82,13 @@ function migrateShape(raw:any): AppState {
   return next
 }
 
-
 export default function App() {
-  // ランディング/ゲスト
+  // 入口モード
   const [entered, setEntered] = useState(false)
-  const [mode, setMode] = useState<'guest'|'editor'|null>(null)
-  const [guestName, setGuestName] = useState<string|null>(null)
+  const [mode, setMode] = useState<'guest' | 'editor' | null>(null)
+  const [guestName, setGuestName] = useState<string | null>(null)
 
-  // 認証/プロフィール
+  // 認証・プロフィール
   const [session, setSession] = useState<boolean | null>(null)
   const [me, setMe] = useState<Me | null>(null)
 
@@ -102,28 +102,44 @@ export default function App() {
   const [selectedPieceId, setSelectedPieceId] = useState<string>('p1')
   const [selectedPart, setSelectedPart] = useState<string>(ORCH_PARTS[0])
 
-  const envMissing = !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY
+  // 環境変数の簡易ガード（本番で白画面回避）
+  const envMissing =
+    !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY
   if (envMissing) {
-    return <div style={{padding:16}}>
-      <h3>設定エラー</h3>
-      <p>Supabase の環境変数が未設定です。管理者へ連絡してください。</p>
-    </div>
+    return (
+      <div style={{ padding: 16 }}>
+        <h3>設定エラー</h3>
+        <p>Supabase の環境変数が未設定です。管理者へ連絡してください。</p>
+      </div>
+    )
   }
 
-  // セッション監視（ゲストなら不要）
+  // セッション監視（ゲスト時は不要）
   useEffect(() => {
     if (guestName) return
     supabase.auth.getSession().then(({ data }) => setSession(!!data.session))
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, sess) => setSession(!!sess))
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, sess) =>
+      setSession(!!sess)
+    )
     return () => sub.subscription.unsubscribe()
   }, [guestName])
 
-  // データ読み込み
+  // データ読み込み & 権限判定
   useEffect(() => {
-    (async () => {
+    ;(async () => {
       setLoading(true)
-      const { data: s } = await supabase.from('sets')
-        .select('data').eq('slug','default-sample').maybeSingle()
+
+      // sets 取得（ゲストでも読み取りOK）
+      const { data: s, error } = await supabase
+        .from('sets')
+        .select('data')
+        .eq('slug', SET_SLUG)
+        .maybeSingle()
+
+      if (error) {
+        console.error('[load sets] error:', error)
+      }
+
       const migrated = migrateShape(s?.data ?? DEFAULT_STATE)
       setState(migrated)
 
@@ -132,41 +148,57 @@ export default function App() {
       setSelectedConcertId(c0.id)
       const p0 = c0.pieces[0]
       setSelectedPieceId(p0.id)
+      setSelectedPart(ORCH_PARTS[0])
 
-      // 権限判定（ログイン時のみ）
+      // 編集権限（ログイン時のみ）
       if (me) {
-        const { data: editors } = await supabase.from('allowed_editors')
-          .select('email').eq('set_slug','default-sample')
-        setCanEdit(!!editors?.some(e => e.email === me.email))
+        const { data: editors } = await supabase
+          .from('allowed_editors')
+          .select('email')
+          .eq('set_slug', SET_SLUG)
+
+        setCanEdit(!!editors?.some((e) => e.email === me.email))
       } else {
         setCanEdit(false)
       }
+
       setLoading(false)
     })()
   }, [me, guestName])
 
   const currentConcert = useMemo(
-    () => state.concerts.find(c=>c.id===selectedConcertId) ?? state.concerts[0],
+    () => state.concerts.find((c) => c.id === selectedConcertId) ?? state.concerts[0],
     [state, selectedConcertId]
   )
   const currentPiece = useMemo(
-    () => currentConcert.pieces.find(p=>p.id===selectedPieceId) ?? currentConcert.pieces[0],
+    () =>
+      currentConcert.pieces.find((p) => p.id === selectedPieceId) ??
+      currentConcert.pieces[0],
     [currentConcert, selectedPieceId]
   )
   const currentPart = useMemo(
-    () => currentPiece.parts.find(pt=>pt.name===selectedPart) ?? currentPiece.parts[0],
+    () => currentPiece.parts.find((pt) => pt.name === selectedPart) ?? currentPiece.parts[0],
     [currentPiece, selectedPart]
   )
 
   const saveState = async (next: AppState) => {
     setState(next)
-    const { error } = await supabase.from('sets')
-      .update({ data: next }).eq('slug','default-sample')
-    if (error) alert(error.message)
+    const { error } = await supabase
+      .from('sets')
+      .update({ data: next })
+      .eq('slug', SET_SLUG)
+    if (error) {
+      console.error('[save sets] error:', error)
+      alert('保存に失敗しました: ' + error.message)
+    }
   }
 
-  // ノート追加（選択パートに）
-  const addNote = async (partial: Omit<Note,'id'|'createdAt'|'authorName'|'authorEmail'>) => {
+  // ====== 追加/編集/削除 ロジック ======
+
+  // ノート追加（選択パート）
+  const addNote = async (
+    partial: Omit<Note, 'id' | 'createdAt' | 'authorName' | 'authorEmail'>
+  ) => {
     if (!canEdit || !me) return
     const n: Note = {
       ...partial,
@@ -176,14 +208,26 @@ export default function App() {
       createdAt: new Date().toISOString()
     }
     const next = structuredClone(state)
-    const c = next.concerts.find(c=>c.id===currentConcert.id)!
-    const p = c.pieces.find(p=>p.id===currentPiece.id)!
-    const pt = p.parts.find(pt=>pt.name===selectedPart)!
+    const c = next.concerts.find((c) => c.id === currentConcert.id)!
+    const p = c.pieces.find((p) => p.id === currentPiece.id)!
+    const pt = p.parts.find((pt) => pt.name === selectedPart)!
     pt.notes.push(n)
     await saveState(next)
   }
 
-  // 演奏会追加（簡易）
+  // ノート削除
+  const deleteNote = async (noteId: string) => {
+    if (!canEdit) return
+    const next = structuredClone(state)
+    const part = next.concerts
+      .find((c) => c.id === currentConcert.id)!
+      .pieces.find((p) => p.id === currentPiece.id)!
+      .parts.find((pt) => pt.name === selectedPart)!
+    part.notes = part.notes.filter((n) => n.id !== noteId)
+    await saveState(next)
+  }
+
+  // 演奏会追加
   const addConcert = async () => {
     if (!canEdit) return
     const title = window.prompt('演奏会名を入力')?.trim()
@@ -193,91 +237,134 @@ export default function App() {
     next.concerts.push({
       id: cId,
       title,
-      pieces: [{
-        id: newId('p'),
-        title: '新しい曲',
-        parts: Array.from(ORCH_PARTS, (name)=>({ name, notes: [] }))
-      }]
+      pieces: [
+        {
+          id: newId('p'),
+          title: '新しい曲',
+          parts: Array.from(ORCH_PARTS, (name) => ({ name, notes: [] }))
+        }
+      ]
     })
     await saveState(next)
     setSelectedConcertId(cId)
+    setSelectedPieceId(next.concerts.find((c) => c.id === cId)!.pieces[0].id)
+    setSelectedPart(ORCH_PARTS[0])
   }
 
-  // 曲追加（選択演奏会に）
+  // 曲追加（選択演奏会）
   const addPiece = async () => {
     if (!canEdit) return
     const title = window.prompt('曲名を入力')?.trim()
     if (!title) return
     const next = structuredClone(state)
-    const c = next.concerts.find(c=>c.id===currentConcert.id)!
+    const c = next.concerts.find((c) => c.id === currentConcert.id)!
     const pId = newId('p')
     c.pieces.push({
       id: pId,
       title,
-      parts: Array.from(ORCH_PARTS, (name)=>({ name, notes: [] }))
+      parts: Array.from(ORCH_PARTS, (name) => ({ name, notes: [] }))
     })
     await saveState(next)
     setSelectedPieceId(pId)
+    setSelectedPart(ORCH_PARTS[0])
   }
 
-    // 演奏会削除
-  const deleteConcert = async (concertId:string) => {
+  // 演奏会名変更
+  const renameConcert = async (concertId: string, title: string) => {
     if (!canEdit) return
     const next = structuredClone(state)
-    next.concerts = next.concerts.filter(c=>c.id !== concertId)
+    const c = next.concerts.find((c) => c.id === concertId)
+    if (!c) return
+    c.title = title
     await saveState(next)
-    // 残っているものを選択状態に
+  }
+
+  // 曲名変更
+  const renamePiece = async (pieceId: string, title: string) => {
+    if (!canEdit) return
+    const next = structuredClone(state)
+    const c = next.concerts.find((c) => c.id === currentConcert.id)
+    if (!c) return
+    const p = c.pieces.find((p) => p.id === pieceId)
+    if (!p) return
+    p.title = title
+    await saveState(next)
+  }
+
+  // 演奏会削除（0件保護つき）
+  const deleteConcert = async (concertId: string) => {
+    if (!canEdit) return
+    const next = structuredClone(state)
+    next.concerts = next.concerts.filter((c) => c.id !== concertId)
+
+    if (next.concerts.length === 0) {
+      next.concerts.push({
+        id: newId('c'),
+        title: '新しい演奏会',
+        pieces: [
+          {
+            id: newId('p'),
+            title: '新しい曲',
+            parts: Array.from(ORCH_PARTS, (name) => ({ name, notes: [] }))
+          }
+        ]
+      })
+    }
+    await saveState(next)
+
     const c0 = next.concerts[0]
     setSelectedConcertId(c0.id)
     setSelectedPieceId(c0.pieces[0].id)
+    setSelectedPart(ORCH_PARTS[0])
   }
 
-  // 曲削除
-  const deletePiece = async (pieceId:string) => {
+  // 曲削除（0件保護つき）
+  const deletePiece = async (pieceId: string) => {
     if (!canEdit) return
     const next = structuredClone(state)
-    const concert = next.concerts.find(c=>c.id===currentConcert.id)!
-    concert.pieces = concert.pieces.filter(p=>p.id !== pieceId)
+    const c = next.concerts.find((c) => c.id === currentConcert.id)
+    if (!c) return
+    c.pieces = c.pieces.filter((p) => p.id !== pieceId)
+
+    if (c.pieces.length === 0) {
+      c.pieces.push({
+        id: newId('p'),
+        title: '新しい曲',
+        parts: Array.from(ORCH_PARTS, (name) => ({ name, notes: [] }))
+      })
+    }
     await saveState(next)
-    const p0 = concert.pieces[0]
-    setSelectedPieceId(p0.id)
+
+    setSelectedPieceId(c.pieces[0].id)
+    setSelectedPart(ORCH_PARTS[0])
   }
 
-  // コメント削除
-  const deleteNote = async (noteId:string) => {
-    if (!canEdit) return
-    const next = structuredClone(state)
-    const part = next.concerts
-      .find(c=>c.id===currentConcert.id)!
-      .pieces.find(p=>p.id===currentPiece.id)!
-      .parts.find(pt=>pt.name===selectedPart)!
-    part.notes = part.notes.filter(n => n.id !== noteId)
-    await saveState(next)
-  }
+  // ================= 画面分岐 =================
 
-
-  // ===== 画面分岐 =====
+  // 入口（まだ選択していない）
   if (!entered) {
     return (
       <Landing
-        onEditor={()=>{ setMode('editor'); setEntered(true) }}
-        onGuest={(n)=>{ setMode('guest'); setGuestName(n); setEntered(true) }}
+        onEditor={() => {
+          setMode('editor')
+          setEntered(true)
+        }}
+        onGuest={(n) => {
+          setMode('guest')
+          setGuestName(n)
+          setEntered(true)
+        }}
       />
     )
   }
-  // ===== 編集者入口（申請 or ログイン） =====
+
+  // 編集者ルート：まだ未ログイン → 申請 or ログイン画面
   if (mode === 'editor' && !session) {
-    // まだログインしていない時は EditorGate を表示
     return <EditorGate onDone={() => { setEntered(false); setMode(null) }} />
   }
-  // ===== ゲスト入口 =====
-  if (mode === 'guest') {
-    // （あなたの現状のゲスト表示ロジックをそのまま）
-    // currentPart.notes を使った閲覧UI
-    // ...
-  }
 
-  if (guestName) {
+  // ゲスト閲覧
+  if (mode === 'guest') {
     return (
       <div className="min-h-screen bg-gradient-to-b from-orange-50 to-white">
         <SelectorBar
@@ -288,28 +375,48 @@ export default function App() {
           onChangeConcert={setSelectedConcertId}
           onChangePiece={setSelectedPieceId}
           onChangePart={setSelectedPart}
-          onAddConcert={()=>{}}
-          onAddPiece={()=>{}}
-          onDeleteConcert={deleteConcert}
-          onDeletePiece={deletePiece}  
+          onAddConcert={() => {}}
+          onAddPiece={() => {}}
+          onRenameConcert={() => {}}
+          onRenamePiece={() => {}}
+          onDeleteConcert={() => {}}
+          onDeletePiece={() => {}}
           canEdit={false}
         />
         <div className="max-w-5xl mx-auto p-4">
-          <Header title={`${currentConcert.title} / ${currentPiece.title}`} right={`${guestName}（閲覧専用）`} />
-          {loading ? <p>読み込み中…</p> : (
-            <NotesList notes={currentPart.notes} canEdit={false} onAdd={()=>{}} onDelete={deleteNote} />
+          <Header
+            title={`${currentConcert.title} / ${currentPiece.title}`}
+            right={`${guestName ?? 'Guest'}（閲覧専用）`}
+          />
+          {loading ? (
+            <p>読み込み中…</p>
+          ) : (
+            <NotesList
+              notes={currentPart.notes}
+              canEdit={false}
+              onAdd={() => {}}
+              onDelete={() => {}}
+            />
           )}
         </div>
       </div>
     )
   }
+
+  // ここから先は編集者ログイン済みの画面
   if (session === null) return null
   if (!session) return <Login />
   if (session && !me) {
-    return <ProfileGate onReady={(p)=>{ localStorage.setItem('displayName', p.displayName); setMe(p) }} />
+    return (
+      <ProfileGate
+        onReady={(p) => {
+          localStorage.setItem('displayName', p.displayName)
+          setMe(p)
+        }}
+      />
+    )
   }
 
-  // ログイン済み（編集者判定込み）
   return (
     <div className="min-h-screen bg-gradient-to-b from-orange-50 to-white">
       <SelectorBar
@@ -322,26 +429,33 @@ export default function App() {
         onChangePart={setSelectedPart}
         onAddConcert={addConcert}
         onAddPiece={addPiece}
+        onRenameConcert={renameConcert}
+        onRenamePiece={renamePiece}
         onDeleteConcert={deleteConcert}
-        onDeletePiece={deletePiece}  
+        onDeletePiece={deletePiece}
         canEdit={canEdit}
       />
       <div className="max-w-5xl mx-auto p-4">
-        <Header title={`${currentConcert.title} / ${currentPiece.title}`} right={`${me!.displayName}（${canEdit?'編集可':'閲覧専用'}）`} />
-        {canEdit && (
-          <div className="mb-3">
-            <InviteEditor setSlug="default-sample" />
-          </div>
-        )}
-        {loading ? <p>読み込み中…</p> : (
-          <NotesList notes={currentPart.notes} canEdit={canEdit} onAdd={addNote} onDelete={deleteNote} />
+        <Header
+          title={`${currentConcert.title} / ${currentPiece.title}`}
+          right={`${me!.displayName}（${canEdit ? '編集可' : '閲覧専用'}）`}
+        />
+        {loading ? (
+          <p>読み込み中…</p>
+        ) : (
+          <NotesList
+            notes={currentPart.notes}
+            canEdit={canEdit}
+            onAdd={addNote}
+            onDelete={deleteNote}
+          />
         )}
       </div>
     </div>
   )
 }
 
-function Header({ title, right }:{ title:string; right:string }) {
+function Header({ title, right }: { title: string; right: string }) {
   return (
     <header className="flex items-center justify-between mb-4">
       <div>

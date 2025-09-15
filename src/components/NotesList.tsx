@@ -10,7 +10,7 @@ export default function NotesList({
   notes: Note[]
   canEdit: boolean
   onAdd: (n: Omit<Note,'id'|'createdAt'|'authorName'|'authorEmail'>)=>void
-  onDelete: (noteId: string)=>void   // 追加: コメント削除
+  onDelete: (noteId: string)=>void
 }) {
   const [from, setFrom] = useState(1)
   const [to, setTo] = useState(1)

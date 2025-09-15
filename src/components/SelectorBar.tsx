@@ -10,6 +10,8 @@ export default function SelectorBar({
   onChangePart,
   onAddConcert,
   onAddPiece,
+  onRenameConcert,
+  onRenamePiece,
   onDeleteConcert,
   onDeletePiece,
   canEdit
@@ -23,12 +25,25 @@ export default function SelectorBar({
   onChangePart: (name: string)=>void
   onAddConcert: ()=>void
   onAddPiece: ()=>void
-  onDeleteConcert: (id: string)=>void   // 追加: 演奏会削除
-  onDeletePiece: (id: string)=>void     // 追加: 曲削除
+  onRenameConcert: (id: string, title: string)=>void
+  onRenamePiece: (id: string, title: string)=>void
+  onDeleteConcert: (id: string)=>void
+  onDeletePiece: (id: string)=>void
   canEdit: boolean
 }) {
   const selectedConcert = concerts.find(c=>c.id===selectedConcertId) ?? concerts[0]
   const pieces = selectedConcert?.pieces ?? []
+
+  const promptRenameConcert = () => {
+    const cur = selectedConcert?.title ?? ''
+    const title = window.prompt('演奏会名を編集', cur)?.trim()
+    if (title) onRenameConcert(selectedConcertId, title)
+  }
+  const promptRenamePiece = () => {
+    const cur = pieces.find(p=>p.id===selectedPieceId)?.title ?? ''
+    const title = window.prompt('曲名を編集', cur)?.trim()
+    if (title) onRenamePiece(selectedPieceId, title)
+  }
 
   return (
     <div className="w-full sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
@@ -53,6 +68,12 @@ export default function SelectorBar({
               ＋演奏会
             </button>
             <button
+              onClick={promptRenameConcert}
+              className="px-3 py-2 rounded-xl border text-orange-700 border-orange-300 hover:bg-orange-50"
+            >
+              編集…
+            </button>
+            <button
               onClick={()=>{
                 if (window.confirm('この演奏会を削除しますか？')) {
                   onDeleteConcert(selectedConcertId)
@@ -60,7 +81,7 @@ export default function SelectorBar({
               }}
               className="px-3 py-2 rounded-xl border border-red-400 text-red-600 hover:bg-red-50"
             >
-              演奏会削除
+              削除
             </button>
           </>
         )}
@@ -85,6 +106,12 @@ export default function SelectorBar({
               ＋曲
             </button>
             <button
+              onClick={promptRenamePiece}
+              className="px-3 py-2 rounded-xl border text-orange-700 border-orange-300 hover:bg-orange-50"
+            >
+              編集…
+            </button>
+            <button
               onClick={()=>{
                 if (window.confirm('この曲を削除しますか？')) {
                   onDeletePiece(selectedPieceId)
@@ -92,7 +119,7 @@ export default function SelectorBar({
               }}
               className="px-3 py-2 rounded-xl border border-red-400 text-red-600 hover:bg-red-50"
             >
-              曲削除
+              削除
             </button>
           </>
         )}
