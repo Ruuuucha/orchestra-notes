@@ -32,17 +32,19 @@ export default function NotesList({
           <h3 className="font-semibold text-orange-800 mb-2">注意を追加</h3>
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-sm text-gray-700">小節</label>
-            <input type="number" min={1} value={from}
+            <input
+              type="number" min={1} value={from}
               onChange={e=>setFrom(parseInt(e.target.value||'1'))}
               className="w-24 px-2 py-1 rounded border" />
             <span>–</span>
-            <input type="number" min={1} value={to}
-              onChange={e=>setTo(parseInt(e.target.value||String(from)))} 
+            <input
+              type="number" min={1} value={to}
+              onChange={e=>setTo(parseInt(e.target.value||String(from)))}
               className="w-24 px-2 py-1 rounded border" />
           </div>
           <textarea
             rows={3}
-            className="mt-2 w-full px-3 py-2 rounded border"
+            className="mt-2 w-full px-3 py-2 rounded-xl border"
             placeholder="どのような注意が必要かを記載"
             value={text}
             onChange={e=>setText(e.target.value)}
@@ -58,32 +60,36 @@ export default function NotesList({
         </div>
       )}
 
-      <div className="mt-4 space-y-3">
+      <div className="mt-4 space-y-4">
         {notes.length===0 ? (
           <p className="text-gray-500">このパートの注意はまだありません。</p>
         ) : notes.map(n=>(
-          <article key={n.id} className="p-3 rounded-2xl border bg-white">
-            <div className="flex items-center justify-between mb-1">
-              <div className="font-semibold text-orange-700">
+          <article key={n.id} className="p-4 rounded-2xl border bg-white">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-1">
+              <div className="font-semibold text-orange-700 text-lg">
                 {n.measureFrom}–{n.measureTo} 小節
               </div>
-              <div className="flex items-center gap-2">
-                <div className="text-xs text-gray-500">
-                  {n.authorName ?? '—'} / {new Date(n.createdAt).toLocaleString()}
-                </div>
-                {canEdit && (
-                  <button
-                    onClick={()=>{
-                      if (window.confirm('このコメントを削除しますか？')) onDelete(n.id)
-                    }}
-                    className="px-2 py-1 text-xs rounded border border-red-400 text-red-600 hover:bg-red-50"
-                  >
-                    削除
-                  </button>
-                )}
+              <div className="text-xs text-gray-500">
+                {n.authorName ?? '—'} / {new Date(n.createdAt).toLocaleString()}
               </div>
             </div>
-            <p className="whitespace-pre-wrap">{n.text}</p>
+
+            <p className="whitespace-pre-wrap leading-7 break-words">
+              {n.text}
+            </p>
+
+            {canEdit && (
+              <div className="mt-2 text-right">
+                <button
+                  onClick={()=>{
+                    if (window.confirm('このコメントを削除しますか？')) onDelete(n.id)
+                  }}
+                  className="px-2 py-1 text-xs rounded border border-red-400 text-red-600 hover:bg-red-50"
+                >
+                  削除
+                </button>
+              </div>
+            )}
           </article>
         ))}
       </div>
