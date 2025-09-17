@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabase'
 import Landing from './components/Landing'
-import EditorGate from './components/EditorGate'
 import Login from './components/Login'
 import ProfileGate from './components/ProfileGate'
 import SelectorBar from './components/SelectorBar'
