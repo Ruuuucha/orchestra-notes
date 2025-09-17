@@ -350,7 +350,6 @@ export default function App() {
     const [moved] = next.concerts.splice(idx, 1)
     next.concerts.splice(to, 0, moved)
     await saveState(next)
-    // 選択は同じIDのまま有効
   }
 
   // 並び替え：曲（選択演奏会内）
@@ -366,7 +365,6 @@ export default function App() {
     const [moved] = c.pieces.splice(idx, 1)
     c.pieces.splice(to, 0, moved)
     await saveState(next)
-    // 選択は同じIDのまま有効
   }
 
   // ================= 画面分岐 =================
@@ -388,9 +386,28 @@ export default function App() {
     )
   }
 
-  // 編集者ルート：まだ未ログイン → 申請 or ログイン画面
-  if (mode === 'editor' && !session) {
-    return <EditorGate onDone={() => { setEntered(false); setMode(null) }} />
+  // 編集者ルート：セッション状態で明確に切替
+  if (mode === 'editor') {
+    if (session === null) {
+      // セッション確認中（Magic Link 直後など）
+      return <div className="min-h-screen grid place-items-center">ログイン確認中…</div>
+    }
+    if (session === false) {
+      // 未ログイン → Login（メールリンク）
+      return <Login />
+    }
+    // session === true
+    if (!me) {
+      // プロフィール（表示名）の初回登録
+      return (
+        <ProfileGate
+          onReady={(p) => {
+            localStorage.setItem('displayName', p.displayName)
+            setMe(p)
+          }}
+        />
+      )
+    }
   }
 
   // ゲスト閲覧
@@ -436,19 +453,6 @@ export default function App() {
   }
 
   // ここから先は編集者ログイン済みの画面
-  if (session === null) return null
-  if (!session) return <Login />
-  if (session && !me) {
-    return (
-      <ProfileGate
-        onReady={(p) => {
-          localStorage.setItem('displayName', p.displayName)
-          setMe(p)
-        }}
-      />
-    )
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-orange-50 to-white">
       <SelectorBar
