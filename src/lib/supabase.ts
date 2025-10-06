@@ -9,5 +9,13 @@ if (!url || !key) {
 
 export const supabase: SupabaseClient = createClient(
   url ?? 'https://invalid.invalid',
-  key ?? 'invalid'
+  key ?? 'invalid',
+  {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: true,  
+      flowType: 'pkce'           
+    }
+  }
 )

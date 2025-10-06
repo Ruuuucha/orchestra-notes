@@ -14,12 +14,16 @@ export default function Login() {
   const sendMagicLink = async () => {
     const target = email.trim()
     if (!target) return
+    
+    // ★ 修正箇所: HashRouter用に #/auth を含める
+    const redirectUrl = import.meta.env.DEV
+      ? 'http://localhost:5173/#/auth'
+      : 'https://ruuuucha.github.io/orchestra-notes/#/auth'
+    
     const { error } = await supabase.auth.signInWithOtp({
       email: target,
       options: {
-        emailRedirectTo: import.meta.env.DEV
-          ? 'http://localhost:5173/'
-          : 'https://ruuuucha.github.io/orchestra-notes/'
+        emailRedirectTo: redirectUrl
       }
     })
     if (error) {
