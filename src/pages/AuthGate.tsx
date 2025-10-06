@@ -1,775 +1,192 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { supabase } from "../lib/supabase";
-import { ORCH_PARTS } from "../constants";
-import "../App.css";
+import { useEffect, useState } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
+import Login from '../components/Login'
+import ProfileGate from '../components/ProfileGate'
 
-type SeatMap = {
-  rows: number;
-  cols: number;
-  backside: boolean;
-  assignments: Record<string, string | null>;
-};
-type SessionV2 = {
-  id: string;
-  date: string;
-  time: string;
-  venue: string;
-  parts: Record<string, SeatMap>;
-};
-type PracticeDataV2 = {
-  roster: string[];
-  sessions: SessionV2[];
-  updatedAt: string;
-};
+export default function AuthGate() {
+  const navigate = useNavigate()
+  const envMissing =
+    !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY
 
-const SET_SLUG = "default-sample";
-const DEMO =
-  !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-const newId = (p: string) =>
-  `${p}_${Math.random().toString(36).slice(2, 8)}_${Date.now()}`;
-
-function buildEmptyAssignments(rows: number, cols: number) {
-  const a: Record<string, string | null> = {};
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) a[`r${r}c${c}`] = null;
-  return a;
-}
-
-function blankSeatMap(rows = 5, cols = 10): SeatMap {
-  return {
-    rows,
-    cols,
-    backside: false,
-    assignments: buildEmptyAssignments(rows, cols),
-  };
-}
-
-function migrateToV2(raw: any): PracticeDataV2 {
-  const base: PracticeDataV2 = {
-    roster: Array.isArray(raw?.roster) ? raw.roster : [],
-    sessions: [],
-    updatedAt: raw?.updatedAt ?? new Date().toISOString(),
-  };
-
-  const sessions: any[] = Array.isArray(raw?.sessions) ? raw.sessions : [];
-
-  for (const s of sessions) {
-    if (s?.parts && typeof s.parts === "object") {
-      const parts: Record<string, SeatMap> = { ...s.parts };
-      for (const name of ORCH_PARTS) {
-        if (!parts[name]) parts[name] = blankSeatMap();
-      }
-      base.sessions.push({
-        id: s.id ?? newId("pr"),
-        date: s.date ?? "",
-        time: s.time ?? "",
-        venue: s.venue ?? "",
-        parts,
-      });
-    } else {
-      const rows = Number(s?.rows) || 5;
-      const cols = Number(s?.cols) || 10;
-      const backside = !!s?.backside;
-      const src = s?.assignments && typeof s.assignments === "object"
-        ? s.assignments
-        : buildEmptyAssignments(rows, cols);
-
-      const parts: Record<string, SeatMap> = {};
-      for (const name of ORCH_PARTS) {
-        parts[name] = {
-          rows,
-          cols,
-          backside,
-          assignments: { ...src },
-        };
-      }
-      base.sessions.push({
-        id: s.id ?? newId("pr"),
-        date: s.date ?? "",
-        time: s.time ?? "",
-        venue: s.venue ?? "",
-        parts,
-      });
-    }
-  }
-  return base;
-}
-
-async function loadFromSupabase(): Promise<PracticeDataV2 | null> {
-  const { data, error } = await supabase
-    .from("practice_data")
-    .select("data")
-    .eq("set_slug", SET_SLUG)
-    .maybeSingle();
-  if (error) {
-    console.error("[practice load]", error);
-    return null;
-  }
-  if (!data?.data) return null;
-  return migrateToV2(data.data);
-}
-
-async function saveToSupabase(payload: PracticeDataV2): Promise<boolean> {
-  const { error } = await supabase
-    .from("practice_data")
-    .upsert({ set_slug: SET_SLUG, data: payload });
-  if (error) {
-    console.error("[practice save]", error);
-    alert("保存に失敗しました: " + error.message);
-    return false;
-  }
-  return true;
-}
-
-function loadFromLocal(): PracticeDataV2 | null {
-  try {
-    const raw = localStorage.getItem(`practice_data:${SET_SLUG}`);
-    return raw ? migrateToV2(JSON.parse(raw)) : null;
-  } catch {
-    return null;
-  }
-}
-function saveToLocal(payload: PracticeDataV2) {
-  localStorage.setItem(`practice_data:${SET_SLUG}`, JSON.stringify(payload));
-}
-
-export default function PracticePage() {
-  const [canEdit, setCanEdit] = useState(false);
-  const [data, setData] = useState<PracticeDataV2 | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [selectedPart, setSelectedPart] = useState<string | null>(null);
-  const [nameInput, setNameInput] = useState("");
-  const [activeName, setActiveName] = useState<string | null>(null);
-  const [newDate, setNewDate] = useState("");
-  const [newTime, setNewTime] = useState("");
-  const [newVenue, setNewVenue] = useState("");
-  const [newRows, setNewRows] = useState(5);
-  const [newCols, setNewCols] = useState(10);
-  const seatAreaRef = useRef<HTMLDivElement | null>(null);
-
-  // 権限チェック
-  useEffect(() => {
-    (async () => {
-      const mode = localStorage.getItem('appMode');
-      
-      // ゲストモードは強制的に閲覧専用
-      if (mode === 'guest' || DEMO) {
-        setCanEdit(false);
-        return;
-      }
-
-      // 編集モードの場合のみ、Supabaseで権限確認
-      if (mode === 'editor' && !DEMO) {
-        const { data: s } = await supabase.auth.getSession();
-        const sess = s?.session ?? null;
-        const email = sess?.user?.email ?? null;
-        if (email) {
-          const { data: editors, error } = await supabase
-            .from("allowed_editors")
-            .select("email")
-            .eq("set_slug", SET_SLUG);
-          if (error) console.error("[allowed_editors]", error);
-          setCanEdit(!!editors?.some((e) => e.email === email));
-        } else {
-          setCanEdit(false);
-        }
-      } else {
-        setCanEdit(false);
-      }
-    })();
-  }, []);
-
-  // データ読み込み
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      let base = DEMO ? loadFromLocal() : await loadFromSupabase();
-      if (!base) {
-        base = {
-          roster: [],
-          sessions: [],
-          updatedAt: new Date().toISOString(),
-        };
-      } else {
-        for (const s of base.sessions) {
-          for (const name of ORCH_PARTS) {
-            if (!s.parts[name]) s.parts[name] = blankSeatMap();
-          }
-          if (typeof s.time !== "string") s.time = "";
-        }
-      }
-      setData(base);
-
-      if (base.sessions.length) {
-        setSelectedSessionId(base.sessions[0].id);
-        setSelectedPart(null);
-      }
-      setLoading(false);
-    })();
-  }, []);
-
-  const sessions = useMemo(() => data?.sessions ?? [], [data?.sessions]);
-  const roster = useMemo(() => data?.roster ?? [], [data?.roster]);
-
-  const selectedSession = useMemo<SessionV2 | null>(() => {
-    if (!data || !selectedSessionId) return null;
-    return data.sessions.find((s) => s.id === selectedSessionId) ?? null;
-  }, [data, selectedSessionId]);
-
-  const persist = async (next: PracticeDataV2) => {
-    next.updatedAt = new Date().toISOString();
-    setData(next);
-    if (DEMO) saveToLocal(next);
-    else await saveToSupabase(next);
-  };
-
-  const addName = async () => {
-    if (!canEdit) return;
-    const name = nameInput.trim();
-    if (!name) return;
-    const next = structuredClone(data!) as PracticeDataV2;
-    if (!next.roster.includes(name)) next.roster.push(name);
-    await persist(next);
-    setNameInput("");
-  };
-
-  const removeName = async (name: string) => {
-    if (!canEdit) return;
-    const next = structuredClone(data!) as PracticeDataV2;
-    next.roster = next.roster.filter((n) => n !== name);
-    for (const s of next.sessions) {
-      for (const part of Object.values(s.parts)) {
-        Object.keys(part.assignments).forEach((k) => {
-          if (part.assignments[k] === name) part.assignments[k] = null;
-        });
-      }
-    }
-    await persist(next);
-    if (activeName === name) setActiveName(null);
-  };
-
-  const createSession = async () => {
-    if (!canEdit) return;
-    const d = newDate.trim();
-    const t = newTime.trim();
-    const v = newVenue.trim();
-    if (!d || !v) {
-      alert("日程と会場を入力してください（時間は任意）");
-      return;
-    }
-    const rows = Math.max(1, Math.min(20, Number(newRows) || 1));
-    const cols = Math.max(1, Math.min(30, Number(newCols) || 1));
-    const parts: Record<string, SeatMap> = {};
-    for (const name of ORCH_PARTS) parts[name] = blankSeatMap(rows, cols);
-
-    const s: SessionV2 = {
-      id: newId("pr"),
-      date: d,
-      time: t,
-      venue: v,
-      parts,
-    };
-    const next = structuredClone(data!) as PracticeDataV2;
-    next.sessions.unshift(s);
-    await persist(next);
-
-    setSelectedSessionId(s.id);
-    setSelectedPart(null);
-    setNewDate("");
-    setNewTime("");
-    setNewVenue("");
-    setNewRows(5);
-    setNewCols(10);
-  };
-
-  const deleteSession = async (sid: string) => {
-    if (!canEdit) return;
-    if (!confirm("この練習会を削除しますか？")) return;
-    const next = structuredClone(data!) as PracticeDataV2;
-    next.sessions = next.sessions.filter((x) => x.id !== sid);
-    await persist(next);
-    if (selectedSessionId === sid) {
-      setSelectedSessionId(next.sessions[0]?.id ?? null);
-      setSelectedPart(null);
-    }
-  };
-
-  const toggleBackside = async () => {
-    if (!canEdit || !selectedSession || !selectedPart) return;
-    const next = structuredClone(data!) as PracticeDataV2;
-    const sm = next.sessions.find((x) => x.id === selectedSession.id)!.parts[selectedPart]!;
-    sm.backside = !sm.backside;
-    await persist(next);
-  };
-
-  const tapSeat = async (seatKey: string) => {
-    if (!canEdit || !selectedSession || !selectedPart) return;
-    const next = structuredClone(data!) as PracticeDataV2;
-    const sm = next.sessions.find((x) => x.id === selectedSession.id)!.parts[selectedPart]!;
-    if (!activeName) {
-      sm.assignments[seatKey] = null;
-    } else {
-      Object.keys(sm.assignments).forEach((k) => {
-        if (sm.assignments[k] === activeName) sm.assignments[k] = null;
-      });
-      sm.assignments[seatKey] = activeName;
-    }
-    await persist(next);
-  };
+  const [hasSession, setHasSession] = useState<boolean>(false)
+  const [checkedOnce, setCheckedOnce] = useState(false)
 
   useEffect(() => {
-    if (selectedPart && seatAreaRef.current) {
-      seatAreaRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }, [selectedPart]);
+    if (envMissing) return
+    ;(async () => {
+      const { data } = await supabase.auth.getSession()
+      setHasSession(!!data.session)
+      setCheckedOnce(true)
+      const sub = supabase.auth.onAuthStateChange((_e, s) => {
+        setHasSession(!!s)
+      })
+      return () => sub.data.subscription.unsubscribe()
+    })()
+  }, [envMissing])
 
-  const sessionLabel = (s: SessionV2) =>
-    `日程：${s.date || "-"}　時間：${s.time || "-"}　（${s.venue || "会場未設定"}）`;
+  const finishEditorMode = () => {
+    localStorage.setItem('appMode', 'editor')
+    navigate('/app', { replace: true })
+  }
 
-  const currentMode = localStorage.getItem("appMode");
-  const modeLabel = currentMode === "editor" ? "編集モード" : "閲覧モード";
-  
-  // 表示用（確認のため）
+  const goToGuest = () => {
+    localStorage.setItem('appMode', 'guest')
+    navigate('/app', { replace: true })
+  }
+
+  if (envMissing) {
+    return (
+      <div style={{ maxWidth: 640, margin: '40px auto', padding: 16 }}>
+        <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>編集者認証</h2>
+        <div style={{ 
+          padding: 16, 
+          marginBottom: 16, 
+          background: '#fef3c7', 
+          border: '1px solid #fbbf24', 
+          borderRadius: 12,
+          color: '#92400e'
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>⚠️ 環境変数が設定されていません</div>
+          <p style={{ margin: 0, fontSize: 14 }}>
+            編集者ログインには Supabase の環境変数が必要です。
+          </p>
+        </div>
+        
+        <div style={{ 
+          padding: 16, 
+          background: '#f9fafb', 
+          border: '1px solid #e5e7eb', 
+          borderRadius: 12,
+          marginBottom: 16
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>設定方法</div>
+          <ol style={{ margin: 0, paddingLeft: 20, fontSize: 14, color: '#374151' }}>
+            <li><code>.env.production</code> ファイルを作成</li>
+            <li><code>VITE_SUPABASE_URL</code> と <code>VITE_SUPABASE_ANON_KEY</code> を設定</li>
+            <li><code>npm run build</code> を実行してビルド</li>
+          </ol>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems:'center' }}>
+          <Link to="/" style={{ textDecoration: 'underline' }}>← モード選択へ戻る</Link>
+          <button
+            onClick={goToGuest}
+            style={{ 
+              marginLeft: 'auto', 
+              padding: '8px 12px', 
+              borderRadius: 10, 
+              border: '1px solid #e5e7eb',
+              background: '#fff',
+              fontWeight: 700
+            }}
+          >
+            閲覧で入る
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!hasSession) {
+    return (
+      <div style={{ maxWidth: 760, margin: '0 auto' }}>
+        <div style={{ padding: 16 }}>
+          <Link to="/" style={{ textDecoration: 'underline' }}>← モード選択へ戻る</Link>
+        </div>
+        
+        <div style={{
+          padding: 16,
+          margin: '0 16px 16px',
+          background: '#e0f2fe',
+          border: '1px solid #bae6fd',
+          borderRadius: 12,
+          color: '#075985'
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>📝 編集者としてログイン</div>
+          <p style={{ margin: 0, fontSize: 14 }}>
+            編集権限を申請するには、メールアドレスでログインしてください。
+            <br />
+            ログイン後、管理者が権限を付与すると編集が可能になります。
+          </p>
+        </div>
+
+        <Login />
+      </div>
+    )
+  }
+
+  const displayName = localStorage.getItem('displayName')
+  if (!displayName) {
+    return (
+      <ProfileGate
+        onReady={(p) => {
+          localStorage.setItem('displayName', p.displayName)
+          finishEditorMode()
+        }}
+      />
+    )
+  }
 
   return (
-    <div style={{ padding: 16, maxWidth: 1120, margin: "0 auto" }}>
-      <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>Orchestra Practice</h2>
-      <div style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "center" }}>
-        <Link to="/app" style={{ textDecoration: "underline" }}>← Appへ</Link>
-        <span style={{ fontSize: 12, color: canEdit ? "#059669" : "#6b7280" }}>
-          {modeLabel}{!canEdit && "（編集不可）"}
-        </span>
-      </div>
-
-      {DEMO && (
-        <p className="text-xs" style={{ color: "#6b7280", marginBottom: 12 }}>
-          ※ デモモード：Supabase 未設定のため localStorage に保存します（共有はされません）
-        </p>
-      )}
-
-      {!canEdit && !DEMO && (
-        <div style={{
-          padding: 12,
-          marginBottom: 12,
-          background: "#fef3c7",
-          border: "1px solid #fbbf24",
-          borderRadius: 8,
-          color: "#92400e"
+    <div className="min-h-screen grid place-items-center">
+      <div style={{ 
+        textAlign: 'center',
+        padding: 24,
+        background: '#fff',
+        border: '1px solid #e5e7eb',
+        borderRadius: 16,
+        maxWidth: 400
+      }}>
+        <div style={{ 
+          width: 48, 
+          height: 48, 
+          margin: '0 auto 16px',
+          background: '#dcfce7',
+          borderRadius: 999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 24
         }}>
-          閲覧モードで開いています。編集が必要な場合は、編集者モードでログインしてください。
+          ✓
         </div>
-      )}
-
-      {loading ? (
-        <p>読み込み中…</p>
-      ) : (
-        <>
-          <section
-            style={{
-              border: "1px solid #e5e7eb",
-              borderRadius: 12,
-              padding: 12,
-              marginBottom: 12,
-              background: "#fff",
-            }}
-          >
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>概要</div>
-            <p style={{ color: "#6b7280", margin: 0 }}>
-              「練習会」から<strong>日程・時間・会場</strong>を登録し、セッションボタン（
-              <strong>日程：… 時間：…（会場）</strong>）を押す → <strong>パート選択</strong> → 座席（表/裏）を編集します。
-              {canEdit ? (
-                <>上部の<strong>名簿</strong>から名前を選んで座席をタップすると割り当てできます。</>
-              ) : (
-                <>現在は閲覧専用モードです。</>
-              )}
-            </p>
-          </section>
-
-          <section
-            style={{
-              border: "1px solid #e5e7eb",
-              borderRadius: 12,
-              padding: 12,
-              marginBottom: 12,
-              background: "#fff",
-            }}
-          >
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>練習会</div>
-
-            {sessions.length === 0 ? (
-              <div style={{ color: "#6b7280", marginBottom: 12 }}>まだ練習会がありません。</div>
-            ) : (
-              <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
-                {sessions.map((s) => {
-                  const opened = selectedSessionId === s.id;
-                  return (
-                    <div key={s.id} style={{ border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
-                      <button
-                        onClick={() => {
-                          setSelectedSessionId(opened ? null : s.id);
-                          setSelectedPart(null);
-                        }}
-                        style={{
-                          width: "100%",
-                          textAlign: "left",
-                          padding: "12px 12px",
-                          background: opened ? "#eff6ff" : "#f9fafb",
-                          borderBottom: "1px solid #e5e7eb",
-                          fontWeight: 800,
-                          color: opened ? "#1d4ed8" : "#111827",
-                        }}
-                      >
-                        {sessionLabel(s)}
-                      </button>
-
-                      {opened && (
-                        <div style={{ padding: 12 }}>
-                          <div style={{ fontWeight: 700, marginBottom: 6 }}>パートを選択</div>
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            {ORCH_PARTS.map((p) => (
-                              <button
-                                key={p}
-                                onClick={() => setSelectedPart(p)}
-                                style={{
-                                  padding: "8px 10px",
-                                  borderRadius: 999,
-                                  background: selectedPart === p ? "#e0e7ff" : "#f3f4f6",
-                                  border: `1px solid ${selectedPart === p ? "#c7d2fe" : "#e5e7eb"}`,
-                                  fontWeight: 700,
-                                }}
-                              >
-                                {p}
-                              </button>
-                            ))}
-                          </div>
-
-                          {selectedPart && (
-                            <div ref={seatAreaRef} style={{ marginTop: 12 }}>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "space-between",
-                                  marginBottom: 8,
-                                  gap: 8,
-                                  flexWrap: "wrap",
-                                }}
-                              >
-                                <div style={{ fontWeight: 800 }}>
-                                  {selectedPart} / {s.parts[selectedPart].rows} × {s.parts[selectedPart].cols} /{" "}
-                                  {s.parts[selectedPart].backside ? "裏" : "表"}
-                                </div>
-                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                  {canEdit && (
-                                    <>
-                                      <button
-                                        onClick={toggleBackside}
-                                        style={{
-                                          padding: "8px 10px",
-                                          borderRadius: 10,
-                                          background: "#f3f4f6",
-                                          border: "1px solid #d1d5db",
-                                          fontWeight: 700,
-                                        }}
-                                      >
-                                        {s.parts[selectedPart].backside ? "表にする" : "裏にする"}
-                                      </button>
-                                      <button
-                                        onClick={() => deleteSession(s.id)}
-                                        style={{
-                                          padding: "8px 10px",
-                                          borderRadius: 10,
-                                          background: "#fff1f2",
-                                          border: "1px solid #fecdd3",
-                                          color: "#b91c1c",
-                                          fontWeight: 700,
-                                        }}
-                                      >
-                                        この練習会を削除
-                                      </button>
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div
-                                style={{
-                                  display: "grid",
-                                  gridTemplateColumns: `repeat(${s.parts[selectedPart].cols}, minmax(44px, 1fr))`,
-                                  gap: 6,
-                                }}
-                              >
-                                {(() => {
-                                  const sm = s.parts[selectedPart];
-                                  const arr = [...Array(sm.rows).keys()];
-                                  const rowsOrder = sm.backside ? arr.reverse() : arr;
-                                  return rowsOrder.flatMap((r) =>
-                                    [...Array(sm.cols).keys()].map((c) => {
-                                      const key = `r${r}c${c}`;
-                                      const assigned = sm.assignments[key];
-                                      const isActive = activeName && assigned === activeName;
-                                      return (
-                                        <button
-                                          key={key}
-                                          onClick={() => canEdit && tapSeat(key)}
-                                          disabled={!canEdit}
-                                          style={{
-                                            height: 44,
-                                            borderRadius: 10,
-                                            border: `1px solid ${assigned ? "#93c5fd" : "#e5e7eb"}`,
-                                            background: assigned
-                                              ? isActive
-                                                ? "#dbeafe"
-                                                : "#eff6ff"
-                                              : "#ffffff",
-                                            color: assigned ? "#1e3a8a" : "#374151",
-                                            fontSize: 12,
-                                            padding: "2px 6px",
-                                            overflow: "hidden",
-                                            textOverflow: "ellipsis",
-                                            whiteSpace: "nowrap",
-                                            cursor: canEdit ? "pointer" : "default",
-                                            opacity: canEdit ? 1 : 0.7,
-                                          }}
-                                          title={assigned || "（空席）"}
-                                        >
-                                          {assigned || "—"}
-                                        </button>
-                                      );
-                                    })
-                                  );
-                                })()}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {canEdit && (
-              <>
-                <div style={{ fontWeight: 800, margin: "4px 0 6px" }}>練習会を登録</div>
-                <div
-                  style={{
-                    display: "grid",
-                    gap: 8,
-                    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>日程</div>
-                    <input
-                      value={newDate}
-                      onChange={(e) => setNewDate(e.target.value)}
-                      type="date"
-                      placeholder="YYYY-MM-DD"
-                      style={{
-                        width: "100%",
-                        padding: "10px 8px",
-                        borderRadius: 8,
-                        border: "1px solid #e5e7eb",
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>時間</div>
-                    <input
-                      value={newTime}
-                      onChange={(e) => setNewTime(e.target.value)}
-                      type="time"
-                      placeholder="HH:MM"
-                      style={{
-                        width: "100%",
-                        padding: "10px 8px",
-                        borderRadius: 8,
-                        border: "1px solid #e5e7eb",
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>会場</div>
-                    <input
-                      value={newVenue}
-                      onChange={(e) => setNewVenue(e.target.value)}
-                      placeholder="会場名"
-                      style={{
-                        width: "100%",
-                        padding: "10px 8px",
-                        borderRadius: 8,
-                        border: "1px solid #e5e7eb",
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>行</div>
-                    <input
-                      value={newRows}
-                      onChange={(e) => setNewRows(Number(e.target.value))}
-                      type="number"
-                      min={1}
-                      max={20}
-                      placeholder="行"
-                      style={{
-                        width: "100%",
-                        padding: "10px 8px",
-                        borderRadius: 8,
-                        border: "1px solid #e5e7eb",
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>列</div>
-                    <input
-                      value={newCols}
-                      onChange={(e) => setNewCols(Number(e.target.value))}
-                      type="number"
-                      min={1}
-                      max={30}
-                      placeholder="列"
-                      style={{
-                        width: "100%",
-                        padding: "10px 8px",
-                        borderRadius: 8,
-                        border: "1px solid #e5e7eb",
-                      }}
-                    />
-                  </div>
-
-                  <div style={{ alignSelf: "end" }}>
-                    <button
-                      onClick={createSession}
-                      style={{
-                        width: "100%",
-                        padding: "10px 8px",
-                        borderRadius: 10,
-                        background: "#111827",
-                        color: "#fff",
-                        fontWeight: 800,
-                      }}
-                    >
-                      追加
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </section>
-
-          <section
-            style={{
-              border: "1px solid #e5e7eb",
-              borderRadius: 12,
-              padding: 12,
-              background: "#fff",
-            }}
-          >
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>名簿</div>
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {roster.length === 0 ? (
-                <div style={{ color: "#6b7280" }}>まだ登録がありません。</div>
-              ) : (
-                roster.map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => canEdit && setActiveName((prev) => (prev === n ? null : n))}
-                    disabled={!canEdit}
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 999,
-                      background: activeName === n ? "#e0e7ff" : "#f3f4f6",
-                      border: `1px solid ${activeName === n ? "#c7d2fe" : "#e5e7eb"}`,
-                      fontWeight: 700,
-                      cursor: canEdit ? "pointer" : "default",
-                      opacity: canEdit ? 1 : 0.7,
-                    }}
-                  >
-                    {n}
-                  </button>
-                ))
-              )}
-            </div>
-
-            {canEdit && (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto",
-                  gap: 8,
-                  marginTop: 8,
-                }}
-              >
-                <input
-                  value={nameInput}
-                  onChange={(e) => setNameInput(e.target.value)}
-                  placeholder="名前を追加"
-                  style={{
-                    padding: "10px 8px",
-                    borderRadius: 8,
-                    border: "1px solid #e5e7eb",
-                  }}
-                />
-                <button
-                  onClick={addName}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    background: "#111827",
-                    color: "#fff",
-                    fontWeight: 800,
-                  }}
-                >
-                  追加
-                </button>
-
-                {roster.length > 0 && (
-                  <div
-                    style={{
-                      gridColumn: "1 / -1",
-                      marginTop: 6,
-                      display: "flex",
-                      gap: 8,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    {roster.map((n) => (
-                      <button
-                        key={`del-${n}`}
-                        onClick={() => removeName(n)}
-                        style={{
-                          padding: "6px 10px",
-                          borderRadius: 999,
-                          background: "#fff1f2",
-                          border: "1px solid #fecdd3",
-                          color: "#b91c1c",
-                          fontSize: 12,
-                          fontWeight: 700,
-                        }}
-                      >
-                        {n} を名簿から削除
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
-
-          <div style={{ marginTop: 12, color: "#6b7280", fontSize: 12 }}>
-            更新: {data?.updatedAt ? new Date(data.updatedAt).toLocaleString() : "-"}
-          </div>
-        </>
-      )}
+        <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8 }}>ログイン完了</div>
+        <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 16 }}>
+          {displayName} としてログインしました。
+          <br />
+          編集権限は管理者が付与します。
+        </p>
+        <button
+          onClick={finishEditorMode}
+          style={{ 
+            width: '100%',
+            padding: '12px 14px', 
+            borderRadius: 12, 
+            background: '#e0f2fe', 
+            border: '1px solid #bae6fd', 
+            color: '#075985', 
+            fontWeight: 800,
+            marginBottom: 8
+          }}
+        >
+          編集者モードで入る
+        </button>
+        <button
+          onClick={goToGuest}
+          style={{ 
+            width: '100%',
+            fontSize: 12, 
+            color: '#6b7280', 
+            textDecoration: 'underline', 
+            background: 'transparent', 
+            border: 'none',
+            padding: '8px'
+          }}
+        >
+          閲覧モードで入る
+        </button>
+      </div>
     </div>
-  );
+  )
 }

@@ -349,19 +349,6 @@ export default function PracticePage() {
         </p>
       )}
 
-      {!canEdit && !DEMO && (
-        <div style={{
-          padding: 12,
-          marginBottom: 12,
-          background: "#fef3c7",
-          border: "1px solid #fbbf24",
-          borderRadius: 8,
-          color: "#92400e"
-        }}>
-          閲覧モードで開いています。編集が必要な場合は、編集者モードでログインしてください。
-        </div>
-      )}
-
       {loading ? (
         <p>読み込み中…</p>
       ) : (
@@ -379,11 +366,7 @@ export default function PracticePage() {
             <p style={{ color: "#6b7280", margin: 0 }}>
               「練習会」から<strong>日程・時間・会場</strong>を登録し、セッションボタン（
               <strong>日程：… 時間：…（会場）</strong>）を押す → <strong>パート選択</strong> → 座席（表/裏）を編集します。
-              {canEdit ? (
-                <>上部の<strong>名簿</strong>から名前を選んで座席をタップすると割り当てできます。</>
-              ) : (
-                <>現在は閲覧専用モードです。</>
-              )}
+              {canEdit && <>上部の<strong>名簿</strong>から名前を選んで座席をタップすると割り当てできます。</>}
             </p>
           </section>
 
