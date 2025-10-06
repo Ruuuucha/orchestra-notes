@@ -1,9 +1,9 @@
 import { HashRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import NotesRoot from './pages/NotesRoot'
-import SheetPage from './pages/SheetPage'
-import PracticePage from './pages/PracticePage'
-import AuthGate from './pages/AuthGate'
+import NotesRoot from './pages/NotesRoot.tsx'
+import SheetPage from './pages/SheetPage.tsx'
+import PracticePage from './pages/PracticePage.tsx'
+import AuthGate from './pages/AuthGate.tsx'
 
 /**
  * 要件：
