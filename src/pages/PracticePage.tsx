@@ -12,7 +12,8 @@ type PartSeats = {
 type SessionV3 = {
   id: string;
   date: string;
-  time: string;
+  startTime: string;
+  endTime: string;
   venue: string;
   parts: Record<string, PartSeats>;
 };
@@ -50,7 +51,8 @@ function migrateToV3(raw: any): PracticeDataV3 {
     base.sessions.push({
       id: s.id ?? newId("pr"),
       date: s.date ?? "",
-      time: s.time ?? "",
+      startTime: s.startTime ?? s.time ?? "",
+      endTime: s.endTime ?? "",
       venue: s.venue ?? "",
       parts,
     });
@@ -104,7 +106,8 @@ export default function PracticePage() {
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
   
   const [newDate, setNewDate] = useState("");
-  const [newTime, setNewTime] = useState("");
+  const [newStartTime, setNewStartTime] = useState("");
+  const [newEndTime, setNewEndTime] = useState("");
   const [newVenue, setNewVenue] = useState("");
   
   const seatAreaRef = useRef<HTMLDivElement | null>(null);
@@ -175,7 +178,8 @@ export default function PracticePage() {
   const createSession = async () => {
     if (!canEdit) return;
     const d = newDate.trim();
-    const t = newTime.trim();
+    const st = newStartTime.trim();
+    const et = newEndTime.trim();
     const v = newVenue.trim();
     if (!d || !v) {
       alert("日程と会場を入力してください（時間は任意）");
@@ -188,7 +192,8 @@ export default function PracticePage() {
     const s: SessionV3 = {
       id: newId("pr"),
       date: d,
-      time: t,
+      startTime: st,
+      endTime: et,
       venue: v,
       parts,
     };
@@ -199,7 +204,8 @@ export default function PracticePage() {
     setSelectedSessionId(s.id);
     setSelectedPart(null);
     setNewDate("");
-    setNewTime("");
+    setNewStartTime("");
+    setNewEndTime("");
     setNewVenue("");
   };
 
@@ -249,8 +255,16 @@ export default function PracticePage() {
     }
   }, [selectedPart]);
 
-  const sessionLabel = (s: SessionV3) =>
-    `日程：${s.date || "-"}　時間：${s.time || "-"}　（${s.venue || "会場未設定"}）`;
+  const sessionLabel = (s: SessionV3) => {
+    const timeStr = s.startTime && s.endTime 
+      ? `${s.startTime}～${s.endTime}` 
+      : s.startTime 
+      ? `${s.startTime}～` 
+      : s.endTime
+      ? `～${s.endTime}`
+      : "-";
+    return `日程：${s.date || "-"}　時間：${timeStr}　（${s.venue || "会場未設定"}）`;
+  };
 
   const currentMode = localStorage.getItem("appMode");
   const modeLabel = currentMode === "editor" ? "編集モード" : "閲覧モード";
@@ -286,8 +300,11 @@ export default function PracticePage() {
           >
             <div style={{ fontWeight: 800, marginBottom: 6 }}>概要</div>
             <p style={{ color: "#6b7280", margin: 0 }}>
-              「練習会」から<strong>日程・時間・会場</strong>を登録し、セッションボタンを押す → <strong>パート選択</strong> → 裏/表に名字を入力します。
-              {canEdit && <>座席をタップして編集、空欄にすると削除できます。</>}
+              {canEdit ? (
+                <>「練習会」から<strong>日程・時間・会場</strong>を登録します。座席指定がある場合はセッションボタンを押す → <strong>パート選択</strong> → 裏/表に名字を入力します。座席をタップして編集、空欄にすると削除できます。</>
+              ) : (
+                <>各練習会の日程・時間・会場、座席指定がある場合は座席の確認が可能です。</>
+              )}
             </p>
           </section>
 
@@ -503,10 +520,26 @@ export default function PracticePage() {
                   </div>
 
                   <div>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>時間</div>
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>開始時間</div>
                     <input
-                      value={newTime}
-                      onChange={(e) => setNewTime(e.target.value)}
+                      value={newStartTime}
+                      onChange={(e) => setNewStartTime(e.target.value)}
+                      type="time"
+                      placeholder="HH:MM"
+                      style={{
+                        width: "100%",
+                        padding: "10px 8px",
+                        borderRadius: 8,
+                        border: "1px solid #e5e7eb",
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>終了時間</div>
+                    <input
+                      value={newEndTime}
+                      onChange={(e) => setNewEndTime(e.target.value)}
                       type="time"
                       placeholder="HH:MM"
                       style={{
