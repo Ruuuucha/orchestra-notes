@@ -2,40 +2,35 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]        # mainブランチにpushされたら実行
+    branches: [main]
 
 permissions:
-  contents: write           # gh-pagesブランチへのpushに必要
+  contents: write
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # ソース取得
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Nodeセットアップ
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # 依存インストール
       - name: Install dependencies
         run: npm ci
 
-      # Viteビルド
       - name: Build
         run: |
           npm run build
           cp dist/index.html dist/404.html
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
 
-      # gh-pagesブランチへデプロイ
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         with:
