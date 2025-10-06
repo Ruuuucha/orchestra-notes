@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
-import { ORCH_PARTS } from "../constants";
 import "../App.css";
 
 type PartSeats = {
-  back: string[];  // 裏の座席（名字の配列）
-  front: string[]; // 表の座席（名字の配列）
+  back: string[];
+  front: string[];
 };
 
 type SessionV3 = {
@@ -15,7 +14,12 @@ type SessionV3 = {
   startTime: string;
   endTime: string;
   venue: string;
-  parts: Record<string, PartSeats>;
+  seats: {
+    Vn1?: PartSeats;
+    Vn2?: PartSeats;
+    Va?: PartSeats;
+    Vc?: PartSeats;
+  };
 };
 
 type PracticeDataV3 = {
@@ -26,6 +30,9 @@ type PracticeDataV3 = {
 const SET_SLUG = "default-sample";
 const DEMO =
   !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+const SEAT_PARTS = ["Vn1", "Vn2", "Va", "Vc"] as const;
+type SeatPart = typeof SEAT_PARTS[number];
 
 const newId = (p: string) =>
   `${p}_${Math.random().toString(36).slice(2, 8)}_${Date.now()}`;
@@ -43,18 +50,13 @@ function migrateToV3(raw: any): PracticeDataV3 {
   const sessions: any[] = Array.isArray(raw?.sessions) ? raw.sessions : [];
 
   for (const s of sessions) {
-    const parts: Record<string, PartSeats> = {};
-    for (const name of ORCH_PARTS) {
-      parts[name] = blankPartSeats();
-    }
-
     base.sessions.push({
       id: s.id ?? newId("pr"),
       date: s.date ?? "",
       startTime: s.startTime ?? s.time ?? "",
       endTime: s.endTime ?? "",
       venue: s.venue ?? "",
-      parts,
+      seats: s.seats ?? {},
     });
   }
   return base;
@@ -103,7 +105,7 @@ export default function PracticePage() {
   const [data, setData] = useState<PracticeDataV3 | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [selectedPart, setSelectedPart] = useState<string | null>(null);
+  const [editingPart, setEditingPart] = useState<SeatPart | null>(null);
   
   const [newDate, setNewDate] = useState("");
   const [newStartTime, setNewStartTime] = useState("");
@@ -155,7 +157,6 @@ export default function PracticePage() {
 
       if (base.sessions.length) {
         setSelectedSessionId(base.sessions[0].id);
-        setSelectedPart(null);
       }
       setLoading(false);
     })();
@@ -186,23 +187,20 @@ export default function PracticePage() {
       return;
     }
 
-    const parts: Record<string, PartSeats> = {};
-    for (const name of ORCH_PARTS) parts[name] = blankPartSeats();
-
     const s: SessionV3 = {
       id: newId("pr"),
       date: d,
       startTime: st,
       endTime: et,
       venue: v,
-      parts,
+      seats: {},
     };
     const next = structuredClone(data!) as PracticeDataV3;
     next.sessions.unshift(s);
     await persist(next);
 
     setSelectedSessionId(s.id);
-    setSelectedPart(null);
+    setEditingPart(null);
     setNewDate("");
     setNewStartTime("");
     setNewEndTime("");
@@ -217,43 +215,45 @@ export default function PracticePage() {
     await persist(next);
     if (selectedSessionId === sid) {
       setSelectedSessionId(next.sessions[0]?.id ?? null);
-      setSelectedPart(null);
+      setEditingPart(null);
     }
   };
 
-  const addSeat = async (side: 'back' | 'front') => {
-    if (!canEdit || !selectedSession || !selectedPart) return;
-    const name = prompt(`名字を入力（${side === 'back' ? '裏' : '表'}に追加）`)?.trim();
+  const addSeat = async (part: SeatPart, side: 'back' | 'front') => {
+    if (!canEdit || !selectedSession) return;
+    const name = prompt(`名字を入力（${part} ${side === 'back' ? '裏' : '表'}に追加）`)?.trim();
     if (!name) return;
     
     const next = structuredClone(data!) as PracticeDataV3;
     const session = next.sessions.find((x) => x.id === selectedSession.id)!;
-    session.parts[selectedPart][side].push(name);
+    if (!session.seats[part]) session.seats[part] = blankPartSeats();
+    session.seats[part]![side].push(name);
     await persist(next);
   };
 
-  const editSeat = async (side: 'back' | 'front', index: number) => {
-    if (!canEdit || !selectedSession || !selectedPart) return;
+  const editSeat = async (part: SeatPart, side: 'back' | 'front', index: number) => {
+    if (!canEdit || !selectedSession) return;
     const next = structuredClone(data!) as PracticeDataV3;
     const session = next.sessions.find((x) => x.id === selectedSession.id)!;
-    const currentName = session.parts[selectedPart][side][index];
+    if (!session.seats[part]) return;
     
-    const newName = prompt(`名字を編集（${side === 'back' ? '裏' : '表'} ${index + 1}番）`, currentName)?.trim();
+    const currentName = session.seats[part]![side][index];
+    const newName = prompt(`名字を編集（${part} ${side === 'back' ? '裏' : '表'} ${index + 1}番）`, currentName)?.trim();
     if (newName === null || newName === undefined) return;
     
     if (newName === '') {
-      session.parts[selectedPart][side].splice(index, 1);
+      session.seats[part]![side].splice(index, 1);
     } else {
-      session.parts[selectedPart][side][index] = newName;
+      session.seats[part]![side][index] = newName;
     }
     await persist(next);
   };
 
   useEffect(() => {
-    if (selectedPart && seatAreaRef.current) {
+    if (editingPart && seatAreaRef.current) {
       seatAreaRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }, [selectedPart]);
+  }, [editingPart]);
 
   const sessionLabel = (s: SessionV3) => {
     const timeStr = s.startTime && s.endTime 
@@ -301,7 +301,7 @@ export default function PracticePage() {
             <div style={{ fontWeight: 800, marginBottom: 6 }}>概要</div>
             <p style={{ color: "#6b7280", margin: 0 }}>
               {canEdit ? (
-                <>「練習会」から<strong>日程・時間・会場</strong>を登録します。座席指定がある場合はセッションボタンを押す → <strong>パート選択</strong> → 裏/表に名字を入力します。座席をタップして編集、空欄にすると削除できます。</>
+                <>「練習会」から<strong>日程・時間・会場</strong>を登録します。座席指定がある場合は各パート（Vn1/Vn2/Va/Vc）の座席を編集できます。</>
               ) : (
                 <>各練習会の日程・時間・会場、座席指定がある場合は座席の確認が可能です。</>
               )}
@@ -330,14 +330,14 @@ export default function PracticePage() {
                       <button
                         onClick={() => {
                           setSelectedSessionId(opened ? null : s.id);
-                          setSelectedPart(null);
+                          setEditingPart(null);
                         }}
                         style={{
                           width: "100%",
                           textAlign: "left",
                           padding: "12px 12px",
                           background: opened ? "#eff6ff" : "#f9fafb",
-                          borderBottom: "1px solid #e5e7eb",
+                          borderBottom: opened ? "1px solid #e5e7eb" : "none",
                           fontWeight: 800,
                           color: opened ? "#1d4ed8" : "#111827",
                         }}
@@ -347,54 +347,56 @@ export default function PracticePage() {
 
                       {opened && (
                         <div style={{ padding: 12 }}>
-                          <div style={{ fontWeight: 700, marginBottom: 6 }}>パートを選択</div>
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            {ORCH_PARTS.map((p) => (
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                            <div style={{ fontWeight: 700 }}>座席指定</div>
+                            {canEdit && (
                               <button
-                                key={p}
-                                onClick={() => setSelectedPart(p)}
+                                onClick={() => deleteSession(s.id)}
                                 style={{
-                                  padding: "8px 10px",
-                                  borderRadius: 999,
-                                  background: selectedPart === p ? "#e0e7ff" : "#f3f4f6",
-                                  border: `1px solid ${selectedPart === p ? "#c7d2fe" : "#e5e7eb"}`,
+                                  padding: "6px 10px",
+                                  borderRadius: 8,
+                                  background: "#fff1f2",
+                                  border: "1px solid #fecdd3",
+                                  color: "#b91c1c",
                                   fontWeight: 700,
+                                  fontSize: 12,
                                 }}
                               >
-                                {p}
+                                この練習会を削除
                               </button>
-                            ))}
+                            )}
                           </div>
 
-                          {selectedPart && (
-                            <div ref={seatAreaRef} style={{ marginTop: 12 }}>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "space-between",
-                                  marginBottom: 8,
-                                  gap: 8,
-                                  flexWrap: "wrap",
-                                }}
-                              >
-                                <div style={{ fontWeight: 800 }}>{selectedPart} の座席</div>
-                                {canEdit && (
-                                  <button
-                                    onClick={() => deleteSession(s.id)}
-                                    style={{
-                                      padding: "8px 10px",
-                                      borderRadius: 10,
-                                      background: "#fff1f2",
-                                      border: "1px solid #fecdd3",
-                                      color: "#b91c1c",
-                                      fontWeight: 700,
-                                    }}
-                                  >
-                                    この練習会を削除
-                                  </button>
-                                )}
-                              </div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                            {SEAT_PARTS.map((part) => {
+                              const hasSeats = s.seats[part] && (s.seats[part]!.back.length > 0 || s.seats[part]!.front.length > 0);
+                              return (
+                                <button
+                                  key={part}
+                                  onClick={() => setEditingPart(editingPart === part ? null : part)}
+                                  style={{
+                                    padding: "8px 12px",
+                                    borderRadius: 999,
+                                    background: editingPart === part ? "#e0e7ff" : hasSeats ? "#dbeafe" : "#f3f4f6",
+                                    border: `1px solid ${editingPart === part ? "#c7d2fe" : hasSeats ? "#93c5fd" : "#e5e7eb"}`,
+                                    fontWeight: 700,
+                                    fontSize: 14,
+                                  }}
+                                >
+                                  {part} {hasSeats && "●"}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {editingPart && (
+                            <div ref={seatAreaRef} style={{ 
+                              border: "1px solid #e0e7ff",
+                              borderRadius: 12,
+                              padding: 12,
+                              background: "#f0f9ff"
+                            }}>
+                              <div style={{ fontWeight: 800, marginBottom: 8 }}>{editingPart} の座席配置</div>
 
                               <div
                                 style={{
@@ -409,43 +411,43 @@ export default function PracticePage() {
                                 <div style={{ fontWeight: 700, textAlign: "center", padding: "8px 0" }}>表</div>
 
                                 {(() => {
-                                  const ps = s.parts[selectedPart];
-                                  const maxLen = Math.max(ps.back.length, ps.front.length, 1);
+                                  const ps = s.seats[editingPart];
+                                  const maxLen = ps ? Math.max(ps.back.length, ps.front.length, 1) : 1;
                                   
                                   return Array.from({ length: maxLen }, (_, i) => (
                                     <React.Fragment key={i}>
                                       <div style={{ fontWeight: 700, padding: "8px 4px" }}>{i + 1}.</div>
                                       
                                       <button
-                                        onClick={() => canEdit && (ps.back[i] ? editSeat('back', i) : addSeat('back'))}
+                                        onClick={() => canEdit && (ps?.back[i] ? editSeat(editingPart, 'back', i) : addSeat(editingPart, 'back'))}
                                         disabled={!canEdit}
                                         style={{
                                           padding: "10px 12px",
                                           borderRadius: 8,
                                           border: "1px solid #e5e7eb",
-                                          background: ps.back[i] ? "#eff6ff" : "#fff",
+                                          background: ps?.back[i] ? "#eff6ff" : "#fff",
                                           textAlign: "left",
                                           cursor: canEdit ? "pointer" : "default",
                                           opacity: canEdit ? 1 : 0.7,
                                         }}
                                       >
-                                        {ps.back[i] || "—"}
+                                        {ps?.back[i] || "—"}
                                       </button>
 
                                       <button
-                                        onClick={() => canEdit && (ps.front[i] ? editSeat('front', i) : addSeat('front'))}
+                                        onClick={() => canEdit && (ps?.front[i] ? editSeat(editingPart, 'front', i) : addSeat(editingPart, 'front'))}
                                         disabled={!canEdit}
                                         style={{
                                           padding: "10px 12px",
                                           borderRadius: 8,
                                           border: "1px solid #e5e7eb",
-                                          background: ps.front[i] ? "#eff6ff" : "#fff",
+                                          background: ps?.front[i] ? "#eff6ff" : "#fff",
                                           textAlign: "left",
                                           cursor: canEdit ? "pointer" : "default",
                                           opacity: canEdit ? 1 : 0.7,
                                         }}
                                       >
-                                        {ps.front[i] || "—"}
+                                        {ps?.front[i] || "—"}
                                       </button>
                                     </React.Fragment>
                                   ));
@@ -455,7 +457,7 @@ export default function PracticePage() {
                                   <>
                                     <div></div>
                                     <button
-                                      onClick={() => addSeat('back')}
+                                      onClick={() => addSeat(editingPart, 'back')}
                                       style={{
                                         padding: "8px 10px",
                                         borderRadius: 8,
@@ -468,7 +470,7 @@ export default function PracticePage() {
                                       + 裏に追加
                                     </button>
                                     <button
-                                      onClick={() => addSeat('front')}
+                                      onClick={() => addSeat(editingPart, 'front')}
                                       style={{
                                         padding: "8px 10px",
                                         borderRadius: 8,
@@ -595,5 +597,4 @@ export default function PracticePage() {
   );
 }
 
-// React import for Fragment
 import React from "react";
