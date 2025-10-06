@@ -4,35 +4,6 @@ import { supabase } from "../lib/supabase";
 import { ORCH_PARTS } from "../constants";
 import "../App.css";
 
-/**
- * Supabase: public.practice_data (set_slug text PK, data jsonb, updated_at timestamptz)
- *
- * 保存形 (v2.1):
- * {
- *   roster: string[],
- *   sessions: [
- *     {
- *       id: "pr_xxx",
- *       date: "YYYY-MM-DD",
- *       time: "HH:MM" | "",
- *       venue: "会場名",
- *       parts: {
- *         [partName: string]: {
- *           rows: number,
- *           cols: number,
- *           backside: boolean,
- *           assignments: { "r0c0": "名前"|null, ... }
- *         }
- *       }
- *     }
- *   ],
- *   updatedAt: "ISO-8601"
- * }
- *
- * 旧データ互換: time が無ければ ""、parts が無ければ全パートへ複製。
- * DEMO (.env 未設定) のときは localStorage("practice_data:default-sample") に保存。
- */
-
 type SeatMap = {
   rows: number;
   cols: number;
@@ -42,7 +13,7 @@ type SeatMap = {
 type SessionV2 = {
   id: string;
   date: string;
-  time: string; // "HH:MM" or ""
+  time: string;
   venue: string;
   parts: Record<string, SeatMap>;
 };
@@ -74,7 +45,6 @@ function blankSeatMap(rows = 5, cols = 10): SeatMap {
   };
 }
 
-/** v1→v2.1 マイグレーション */
 function migrateToV2(raw: any): PracticeDataV2 {
   const base: PracticeDataV2 = {
     roster: Array.isArray(raw?.roster) ? raw.roster : [],
@@ -85,7 +55,6 @@ function migrateToV2(raw: any): PracticeDataV2 {
   const sessions: any[] = Array.isArray(raw?.sessions) ? raw.sessions : [];
 
   for (const s of sessions) {
-    // v2 系（parts がある）
     if (s?.parts && typeof s.parts === "object") {
       const parts: Record<string, SeatMap> = { ...s.parts };
       for (const name of ORCH_PARTS) {
@@ -99,7 +68,6 @@ function migrateToV2(raw: any): PracticeDataV2 {
         parts,
       });
     } else {
-      // v1: rows/cols/backside/assignments を全パートに複製
       const rows = Number(s?.rows) || 5;
       const cols = Number(s?.cols) || 10;
       const backside = !!s?.backside;
@@ -167,61 +135,53 @@ function saveToLocal(payload: PracticeDataV2) {
 }
 
 export default function PracticePage() {
-  // 権限（Notes / Sheet と同じ）
   const [canEdit, setCanEdit] = useState(false);
-
-  // データ
   const [data, setData] = useState<PracticeDataV2 | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // 選択状態
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
-
-  // 名簿
   const [nameInput, setNameInput] = useState("");
   const [activeName, setActiveName] = useState<string | null>(null);
-
-  // 新規セッション（登録セル）
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("");
   const [newVenue, setNewVenue] = useState("");
   const [newRows, setNewRows] = useState(5);
   const [newCols, setNewCols] = useState(10);
-
-  // スクロール用
   const seatAreaRef = useRef<HTMLDivElement | null>(null);
 
-  // 権限（Supabase allowed_editors）
+  // 権限チェック
   useEffect(() => {
     (async () => {
-      if (DEMO) {
+      const mode = localStorage.getItem('appMode');
+      
+      // ゲストモードは強制的に閲覧専用
+      if (mode === 'guest' || DEMO) {
         setCanEdit(false);
         return;
       }
-      const { data: s } = await supabase.auth.getSession();
-      const sess = s?.session ?? null;
-      const email = sess?.user?.email ?? null;
-      if (email) {
-        const { data: editors, error } = await supabase
-          .from("allowed_editors")
-          .select("email")
-          .eq("set_slug", SET_SLUG);
-        if (error) console.error("[allowed_editors]", error);
-        setCanEdit(!!editors?.some((e) => e.email === email));
+
+      // 編集モードの場合のみ、Supabaseで権限確認
+      if (mode === 'editor' && !DEMO) {
+        const { data: s } = await supabase.auth.getSession();
+        const sess = s?.session ?? null;
+        const email = sess?.user?.email ?? null;
+        if (email) {
+          const { data: editors, error } = await supabase
+            .from("allowed_editors")
+            .select("email")
+            .eq("set_slug", SET_SLUG);
+          if (error) console.error("[allowed_editors]", error);
+          setCanEdit(!!editors?.some((e) => e.email === email));
+        } else {
+          setCanEdit(false);
+        }
       } else {
         setCanEdit(false);
       }
     })();
   }, []);
 
-  // 追加：モードが guest の場合は強制的に閲覧専用
-  useEffect(() => {
-    const mode = localStorage.getItem("appMode");
-    if (mode === "guest") setCanEdit(false);
-  }, []);
-
-  // 読み込み
+  // データ読み込み
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -233,7 +193,6 @@ export default function PracticePage() {
           updatedAt: new Date().toISOString(),
         };
       } else {
-        // パート補完 / time 補完
         for (const s of base.sessions) {
           for (const name of ORCH_PARTS) {
             if (!s.parts[name]) s.parts[name] = blankSeatMap();
@@ -243,10 +202,9 @@ export default function PracticePage() {
       }
       setData(base);
 
-      // 初期選択
       if (base.sessions.length) {
         setSelectedSessionId(base.sessions[0].id);
-        setSelectedPart(null); // 最初はパート未選択（押して選ぶ）
+        setSelectedPart(null);
       }
       setLoading(false);
     })();
@@ -267,7 +225,6 @@ export default function PracticePage() {
     else await saveToSupabase(next);
   };
 
-  // 名簿追加/削除
   const addName = async () => {
     if (!canEdit) return;
     const name = nameInput.trim();
@@ -277,6 +234,7 @@ export default function PracticePage() {
     await persist(next);
     setNameInput("");
   };
+
   const removeName = async (name: string) => {
     if (!canEdit) return;
     const next = structuredClone(data!) as PracticeDataV2;
@@ -292,7 +250,6 @@ export default function PracticePage() {
     if (activeName === name) setActiveName(null);
   };
 
-  // セッション作成/削除
   const createSession = async () => {
     if (!canEdit) return;
     const d = newDate.trim();
@@ -339,7 +296,6 @@ export default function PracticePage() {
     }
   };
 
-  // 表/裏トグル（選択パート）
   const toggleBackside = async () => {
     if (!canEdit || !selectedSession || !selectedPart) return;
     const next = structuredClone(data!) as PracticeDataV2;
@@ -348,7 +304,6 @@ export default function PracticePage() {
     await persist(next);
   };
 
-  // 座席タップ
   const tapSeat = async (seatKey: string) => {
     if (!canEdit || !selectedSession || !selectedPart) return;
     const next = structuredClone(data!) as PracticeDataV2;
@@ -364,7 +319,6 @@ export default function PracticePage() {
     await persist(next);
   };
 
-  // パート選択時に座席エリアへスクロール
   useEffect(() => {
     if (selectedPart && seatAreaRef.current) {
       seatAreaRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -374,13 +328,18 @@ export default function PracticePage() {
   const sessionLabel = (s: SessionV2) =>
     `日程：${s.date || "-"}　時間：${s.time || "-"}　（${s.venue || "会場未設定"}）`;
 
+  const currentMode = localStorage.getItem("appMode");
+  const modeLabel = currentMode === "editor" ? "編集モード" : "閲覧モード";
+  
+  // 表示用（確認のため）
+
   return (
     <div style={{ padding: 16, maxWidth: 1120, margin: "0 auto" }}>
       <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>Orchestra Practice</h2>
       <div style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "center" }}>
         <Link to="/app" style={{ textDecoration: "underline" }}>← Appへ</Link>
-        <span style={{ fontSize: 12, color: "#6b7280" }}>
-          現在のモード：{localStorage.getItem("appMode") === "editor" ? "編集" : "閲覧"}
+        <span style={{ fontSize: 12, color: canEdit ? "#059669" : "#6b7280" }}>
+          {modeLabel}{!canEdit && "（編集不可）"}
         </span>
       </div>
 
@@ -390,11 +349,23 @@ export default function PracticePage() {
         </p>
       )}
 
+      {!canEdit && !DEMO && (
+        <div style={{
+          padding: 12,
+          marginBottom: 12,
+          background: "#fef3c7",
+          border: "1px solid #fbbf24",
+          borderRadius: 8,
+          color: "#92400e"
+        }}>
+          閲覧モードで開いています。編集が必要な場合は、編集者モードでログインしてください。
+        </div>
+      )}
+
       {loading ? (
         <p>読み込み中…</p>
       ) : (
         <>
-          {/* ===== 概要 ===== */}
           <section
             style={{
               border: "1px solid #e5e7eb",
@@ -408,11 +379,14 @@ export default function PracticePage() {
             <p style={{ color: "#6b7280", margin: 0 }}>
               「練習会」から<strong>日程・時間・会場</strong>を登録し、セッションボタン（
               <strong>日程：… 時間：…（会場）</strong>）を押す → <strong>パート選択</strong> → 座席（表/裏）を編集します。
-              上部の<strong>名簿</strong>から名前を選んで座席をタップすると割り当てできます。
+              {canEdit ? (
+                <>上部の<strong>名簿</strong>から名前を選んで座席をタップすると割り当てできます。</>
+              ) : (
+                <>現在は閲覧専用モードです。</>
+              )}
             </p>
           </section>
 
-          {/* ===== 練習会（一覧＋登録） ===== */}
           <section
             style={{
               border: "1px solid #e5e7eb",
@@ -424,7 +398,6 @@ export default function PracticePage() {
           >
             <div style={{ fontWeight: 800, marginBottom: 8 }}>練習会</div>
 
-            {/* 一覧 */}
             {sessions.length === 0 ? (
               <div style={{ color: "#6b7280", marginBottom: 12 }}>まだ練習会がありません。</div>
             ) : (
@@ -436,7 +409,7 @@ export default function PracticePage() {
                       <button
                         onClick={() => {
                           setSelectedSessionId(opened ? null : s.id);
-                          setSelectedPart(null); // 開き直し時は未選択から
+                          setSelectedPart(null);
                         }}
                         style={{
                           width: "100%",
@@ -451,7 +424,6 @@ export default function PracticePage() {
                         {sessionLabel(s)}
                       </button>
 
-                      {/* パート選択＆座席 */}
                       {opened && (
                         <div style={{ padding: 12 }}>
                           <div style={{ fontWeight: 700, marginBottom: 6 }}>パートを選択</div>
@@ -473,7 +445,6 @@ export default function PracticePage() {
                             ))}
                           </div>
 
-                          {/* 座席（選択したパート） */}
                           {selectedPart && (
                             <div ref={seatAreaRef} style={{ marginTop: 12 }}>
                               <div
@@ -492,33 +463,33 @@ export default function PracticePage() {
                                 </div>
                                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                                   {canEdit && (
-                                    <button
-                                      onClick={toggleBackside}
-                                      style={{
-                                        padding: "8px 10px",
-                                        borderRadius: 10,
-                                        background: "#f3f4f6",
-                                        border: "1px solid #d1d5db",
-                                        fontWeight: 700,
-                                      }}
-                                    >
-                                      {s.parts[selectedPart].backside ? "表にする" : "裏にする"}
-                                    </button>
-                                  )}
-                                  {canEdit && (
-                                    <button
-                                      onClick={() => deleteSession(s.id)}
-                                      style={{
-                                        padding: "8px 10px",
-                                        borderRadius: 10,
-                                        background: "#fff1f2",
-                                        border: "1px solid #fecdd3",
-                                        color: "#b91c1c",
-                                        fontWeight: 700,
-                                      }}
-                                    >
-                                      この練習会を削除
-                                    </button>
+                                    <>
+                                      <button
+                                        onClick={toggleBackside}
+                                        style={{
+                                          padding: "8px 10px",
+                                          borderRadius: 10,
+                                          background: "#f3f4f6",
+                                          border: "1px solid #d1d5db",
+                                          fontWeight: 700,
+                                        }}
+                                      >
+                                        {s.parts[selectedPart].backside ? "表にする" : "裏にする"}
+                                      </button>
+                                      <button
+                                        onClick={() => deleteSession(s.id)}
+                                        style={{
+                                          padding: "8px 10px",
+                                          borderRadius: 10,
+                                          background: "#fff1f2",
+                                          border: "1px solid #fecdd3",
+                                          color: "#b91c1c",
+                                          fontWeight: 700,
+                                        }}
+                                      >
+                                        この練習会を削除
+                                      </button>
+                                    </>
                                   )}
                                 </div>
                               </div>
@@ -542,7 +513,7 @@ export default function PracticePage() {
                                       return (
                                         <button
                                           key={key}
-                                          onClick={() => tapSeat(key)}
+                                          onClick={() => canEdit && tapSeat(key)}
                                           disabled={!canEdit}
                                           style={{
                                             height: 44,
@@ -559,6 +530,8 @@ export default function PracticePage() {
                                             overflow: "hidden",
                                             textOverflow: "ellipsis",
                                             whiteSpace: "nowrap",
+                                            cursor: canEdit ? "pointer" : "default",
+                                            opacity: canEdit ? 1 : 0.7,
                                           }}
                                           title={assigned || "（空席）"}
                                         >
@@ -579,7 +552,6 @@ export default function PracticePage() {
               </div>
             )}
 
-            {/* 登録フォーム（別セル） */}
             {canEdit && (
               <>
                 <div style={{ fontWeight: 800, margin: "4px 0 6px" }}>練習会を登録</div>
@@ -693,7 +665,6 @@ export default function PracticePage() {
             )}
           </section>
 
-          {/* ===== 名簿 ===== */}
           <section
             style={{
               border: "1px solid #e5e7eb",
@@ -711,13 +682,16 @@ export default function PracticePage() {
                 roster.map((n) => (
                   <button
                     key={n}
-                    onClick={() => setActiveName((prev) => (prev === n ? null : n))}
+                    onClick={() => canEdit && setActiveName((prev) => (prev === n ? null : n))}
+                    disabled={!canEdit}
                     style={{
                       padding: "8px 10px",
                       borderRadius: 999,
                       background: activeName === n ? "#e0e7ff" : "#f3f4f6",
                       border: `1px solid ${activeName === n ? "#c7d2fe" : "#e5e7eb"}`,
                       fontWeight: 700,
+                      cursor: canEdit ? "pointer" : "default",
+                      opacity: canEdit ? 1 : 0.7,
                     }}
                   >
                     {n}
