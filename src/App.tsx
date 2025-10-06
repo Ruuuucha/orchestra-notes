@@ -15,12 +15,10 @@ import AuthGate from './pages/AuthGate'
 
 function ModeSelect() {
   const navigate = useNavigate()
-  const [mode, setMode] = useState<string | null>(null)
 
   // 初回表示は「選択だけ」。選んだらランチャーへ。
   const chooseGuest = () => {
     localStorage.setItem('appMode', 'guest')
-    setMode('guest')
     navigate('/app', { replace: true })
   }
   const chooseEditor = () => {
