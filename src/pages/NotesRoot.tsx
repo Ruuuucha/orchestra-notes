@@ -14,6 +14,8 @@ import {
 } from '../constants'
 import '../App.css'
 
+type Me = { userId: string; email: string; displayName: string }
+
 const DEMO =
   !import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY
 
@@ -80,7 +82,7 @@ export default function NotesRoot() {
   const [state, setState] = useState<AppState>(DEFAULT_STATE)
   const [loading, setLoading] = useState(true)
   const [canEdit, setCanEdit] = useState(false)
-  const [me, setMe] = useState<{ userId: string; email: string; displayName: string } | null>(null)
+  const [me, setMe] = useState<Me | null>(null)
   const [selectedConcertId, setSelectedConcertId] = useState<string>('c1')
   const [selectedPieceId, setSelectedPieceId] = useState<string>('p1')
   const [selectedPart, setSelectedPart] = useState<string>(ORCH_PARTS[0])
@@ -99,6 +101,7 @@ export default function NotesRoot() {
         const p0 = c0.pieces[0]
         setSelectedPieceId(p0.id)
         setSelectedPart(ORCH_PARTS[0])
+        setCanEdit(false)
         setLoading(false)
         return
       }
@@ -122,9 +125,29 @@ export default function NotesRoot() {
       setSelectedPieceId(p0.id)
       setSelectedPart(ORCH_PARTS[0])
 
+      // 編集者モードの場合のみ権限チェック
+      if (appMode === 'editor') {
+        const { data: sess } = await supabase.auth.getSession()
+        const email = sess?.session?.user?.email
+        const displayName = localStorage.getItem('displayName') || 'User'
+        
+        if (email) {
+          setMe({ userId: sess.session!.user.id, email, displayName })
+          
+          const { data: editors } = await supabase
+            .from('allowed_editors')
+            .select('email')
+            .eq('set_slug', SET_SLUG)
+
+          setCanEdit(!!editors?.some((e) => e.email === email))
+        }
+      } else {
+        setCanEdit(false)
+      }
+
       setLoading(false)
     })()
-  }, [])
+  }, [appMode])
 
   const currentConcert = useMemo(
     () => state.concerts.find((c) => c.id === selectedConcertId) ?? state.concerts[0],
@@ -141,10 +164,185 @@ export default function NotesRoot() {
     [currentPiece, selectedPart]
   )
 
+  const saveState = async (next: AppState) => {
+    setState(next)
+    if (DEMO) return
+    const { error } = await supabase
+      .from('sets')
+      .update({ data: next })
+      .eq('slug', SET_SLUG)
+    if (error) {
+      console.error('[save sets] error:', error)
+      alert('保存に失敗しました: ' + error.message)
+    }
+  }
+
+  const addNote = async (
+    partial: Omit<Note, 'id' | 'createdAt' | 'authorName' | 'authorEmail'>
+  ) => {
+    if (!canEdit || !me || DEMO) return
+    const n: Note = {
+      ...partial,
+      id: crypto.randomUUID(),
+      authorName: me.displayName,
+      authorEmail: me.email,
+      createdAt: new Date().toISOString()
+    }
+    const next = structuredClone(state)
+    const c = next.concerts.find((c) => c.id === currentConcert.id)!
+    const p = c.pieces.find((p) => p.id === currentPiece.id)!
+    const pt = p.parts.find((pt) => pt.name === selectedPart)!
+    pt.notes.push(n)
+    await saveState(next)
+  }
+
+  const deleteNote = async (noteId: string) => {
+    if (!canEdit || DEMO) return
+    const next = structuredClone(state)
+    const part = next.concerts
+      .find((c) => c.id === currentConcert.id)!
+      .pieces.find((p) => p.id === currentPiece.id)!
+      .parts.find((pt) => pt.name === selectedPart)!
+    part.notes = part.notes.filter((n) => n.id !== noteId)
+    await saveState(next)
+  }
+
+  const addConcert = async () => {
+    if (!canEdit || DEMO) return
+    const title = window.prompt('演奏会名を入力')?.trim()
+    if (!title) return
+    const cId = newId('c')
+    const next = structuredClone(state)
+    next.concerts.push({
+      id: cId,
+      title,
+      pieces: [
+        {
+          id: newId('p'),
+          title: '新しい曲',
+          parts: Array.from(ORCH_PARTS, (name) => ({ name, notes: [] }))
+        }
+      ]
+    })
+    await saveState(next)
+    setSelectedConcertId(cId)
+    setSelectedPieceId(next.concerts.find((c) => c.id === cId)!.pieces[0].id)
+    setSelectedPart(ORCH_PARTS[0])
+  }
+
+  const addPiece = async () => {
+    if (!canEdit || DEMO) return
+    const title = window.prompt('曲名を入力')?.trim()
+    if (!title) return
+    const next = structuredClone(state)
+    const c = next.concerts.find((c) => c.id === currentConcert.id)!
+    const pId = newId('p')
+    c.pieces.push({
+      id: pId,
+      title,
+      parts: Array.from(ORCH_PARTS, (name) => ({ name, notes: [] }))
+    })
+    await saveState(next)
+    setSelectedPieceId(pId)
+    setSelectedPart(ORCH_PARTS[0])
+  }
+
+  const renameConcert = async (concertId: string, title: string) => {
+    if (!canEdit || DEMO) return
+    const next = structuredClone(state)
+    const c = next.concerts.find((c) => c.id === concertId)
+    if (!c) return
+    c.title = title
+    await saveState(next)
+  }
+
+  const renamePiece = async (pieceId: string, title: string) => {
+    if (!canEdit || DEMO) return
+    const next = structuredClone(state)
+    const c = next.concerts.find((c) => c.id === currentConcert.id)
+    if (!c) return
+    const p = c.pieces.find((p) => p.id === pieceId)
+    if (!p) return
+    p.title = title
+    await saveState(next)
+  }
+
+  const deleteConcert = async (concertId: string) => {
+    if (!canEdit || DEMO) return
+    const next = structuredClone(state)
+    next.concerts = next.concerts.filter((c) => c.id !== concertId)
+
+    if (next.concerts.length === 0) {
+      next.concerts.push({
+        id: newId('c'),
+        title: '新しい演奏会',
+        pieces: [
+          {
+            id: newId('p'),
+            title: '新しい曲',
+            parts: Array.from(ORCH_PARTS, (name) => ({ name, notes: [] }))
+          }
+        ]
+      })
+    }
+    await saveState(next)
+
+    const c0 = next.concerts[0]
+    setSelectedConcertId(c0.id)
+    setSelectedPieceId(c0.pieces[0].id)
+    setSelectedPart(ORCH_PARTS[0])
+  }
+
+  const deletePiece = async (pieceId: string) => {
+    if (!canEdit || DEMO) return
+    const next = structuredClone(state)
+    const c = next.concerts.find((c) => c.id === currentConcert.id)
+    if (!c) return
+    c.pieces = c.pieces.filter((p) => p.id !== pieceId)
+
+    if (c.pieces.length === 0) {
+      c.pieces.push({
+        id: newId('p'),
+        title: '新しい曲',
+        parts: Array.from(ORCH_PARTS, (name) => ({ name, notes: [] }))
+      })
+    }
+    await saveState(next)
+
+    setSelectedPieceId(c.pieces[0].id)
+    setSelectedPart(ORCH_PARTS[0])
+  }
+
+  const reorderConcert = async (concertId: string, dir: 'up'|'down') => {
+    if (!canEdit || DEMO) return
+    const next = structuredClone(state)
+    const idx = next.concerts.findIndex(c=>c.id===concertId)
+    if (idx === -1) return
+    const to = dir === 'up' ? idx - 1 : idx + 1
+    if (to < 0 || to >= next.concerts.length) return
+    const [moved] = next.concerts.splice(idx, 1)
+    next.concerts.splice(to, 0, moved)
+    await saveState(next)
+  }
+
+  const reorderPiece = async (pieceId: string, dir: 'up'|'down') => {
+    if (!canEdit || DEMO) return
+    const next = structuredClone(state)
+    const c = next.concerts.find(c=>c.id===currentConcert.id)
+    if (!c) return
+    const idx = c.pieces.findIndex(p=>p.id===pieceId)
+    if (idx === -1) return
+    const to = dir === 'up' ? idx - 1 : idx + 1
+    if (to < 0 || to >= c.pieces.length) return
+    const [moved] = c.pieces.splice(idx, 1)
+    c.pieces.splice(to, 0, moved)
+    await saveState(next)
+  }
+
   const rightLabel = DEMO
     ? 'Demo（閲覧専用）'
     : appMode === 'editor'
-    ? '編集者モード（閲覧専用）'
+    ? canEdit ? `${me?.displayName || 'Editor'}（編集可）` : `${me?.displayName || 'Editor'}（閲覧専用）`
     : '閲覧モード'
 
   return (
@@ -157,15 +355,15 @@ export default function NotesRoot() {
         onChangeConcert={setSelectedConcertId}
         onChangePiece={setSelectedPieceId}
         onChangePart={setSelectedPart}
-        onAddConcert={() => {}}
-        onAddPiece={() => {}}
-        onRenameConcert={() => {}}
-        onRenamePiece={() => {}}
-        onDeleteConcert={() => {}}
-        onDeletePiece={() => {}}
-        onReorderConcert={() => {}}
-        onReorderPiece={() => {}}
-        canEdit={false}
+        onAddConcert={() => { addConcert() }}
+        onAddPiece={() => { addPiece() }}
+        onRenameConcert={(id, title) => { renameConcert(id, title) }}
+        onRenamePiece={(id, title) => { renamePiece(id, title) }}
+        onDeleteConcert={(id) => { deleteConcert(id) }}
+        onDeletePiece={(id) => { deletePiece(id) }}
+        onReorderConcert={(id, dir) => { reorderConcert(id, dir) }}
+        onReorderPiece={(id, dir) => { reorderPiece(id, dir) }}
+        canEdit={canEdit}
       />
       <div className="max-w-5xl mx-auto p-4">
         <div className="flex items-center justify-between mb-4">
@@ -189,13 +387,15 @@ export default function NotesRoot() {
           <>
             <NotesList
               notes={currentPart.notes}
-              canEdit={false}
-              onAdd={() => {}}
-              onDelete={() => {}}
+              canEdit={canEdit}
+              onAdd={(partial) => { addNote(partial) }}
+              onDelete={(noteId) => { deleteNote(noteId) }}
             />
-            <p className="mt-4 text-xs text-gray-500">
-              ※ このアプリは閲覧専用です。編集が必要な場合は管理者にお問い合わせください。
-            </p>
+            {!canEdit && (
+              <p className="mt-4 text-xs text-gray-500">
+                ※ このアプリは閲覧専用です。編集が必要な場合は管理者にお問い合わせください。
+              </p>
+            )}
           </>
         )}
       </div>
