@@ -79,6 +79,8 @@ function migrateShape(raw: any): AppState {
 export default function NotesRoot() {
   const [state, setState] = useState<AppState>(DEFAULT_STATE)
   const [loading, setLoading] = useState(true)
+  const [canEdit, setCanEdit] = useState(false)
+  const [me, setMe] = useState<{ userId: string; email: string; displayName: string } | null>(null)
   const [selectedConcertId, setSelectedConcertId] = useState<string>('c1')
   const [selectedPieceId, setSelectedPieceId] = useState<string>('p1')
   const [selectedPart, setSelectedPart] = useState<string>(ORCH_PARTS[0])
