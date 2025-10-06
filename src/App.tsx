@@ -1,10 +1,9 @@
 import { HashRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import NotesRoot from './pages/NotesRoot.tsx'
-import SheetPage from './pages/SheetPage.tsx'
-import PracticePage from './pages/PracticePage.tsx'
-import AuthGate from './pages/AuthGate.tsx'
-
+import NotesRoot from './pages/NotesRoot'     
+import SheetPage from './pages/SheetPage' 
+import PracticePage from './pages/PracticePage'
+import AuthGate from './pages/AuthGate'  
 /**
  * 要件：
  * - URLを開いた直後は「閲覧 or 編集」の選択"だけ"を見せる

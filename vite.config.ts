@@ -5,4 +5,7 @@ import tailwind from '@tailwindcss/vite'
 export default defineConfig({
   base: '/orchestra-notes/',
   plugins: [react(), tailwind()],
+  resolve: {
+    extensions: ['.tsx', '.ts', '.jsx', '.js']
+  }
 })
