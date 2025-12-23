@@ -17,7 +17,7 @@ export default function Login() {
     
     // ★ 修正箇所: HashRouter用に #/auth を含める
     const redirectUrl = import.meta.env.DEV
-      ? 'http://localhost:5173/#/auth'
+      ? 'http://localhost:5173/orchestra-notes/#/auth'
       : 'https://ruuuucha.github.io/orchestra-notes/#/auth'
     
     const { error } = await supabase.auth.signInWithOtp({

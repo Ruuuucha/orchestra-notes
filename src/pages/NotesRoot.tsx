@@ -130,10 +130,10 @@ export default function NotesRoot() {
         const { data: sess } = await supabase.auth.getSession()
         const email = sess?.session?.user?.email
         const displayName = localStorage.getItem('displayName') || 'User'
-        
+
         if (email) {
           setMe({ userId: sess.session!.user.id, email, displayName })
-          
+
           const { data: editors } = await supabase
             .from('allowed_editors')
             .select('email')
@@ -163,6 +163,17 @@ export default function NotesRoot() {
     () => currentPiece.parts.find((pt) => pt.name === selectedPart) ?? currentPiece.parts[0],
     [currentPiece, selectedPart]
   )
+
+  // ★ 追加：ノートを小節番号順にソート（measureFrom → measureTo → createdAt）
+  const sortedNotes = useMemo(() => {
+    const notes = currentPart?.notes ?? []
+    return [...notes].sort((a, b) => {
+      if (a.measureFrom !== b.measureFrom) return a.measureFrom - b.measureFrom
+      if (a.measureTo !== b.measureTo) return a.measureTo - b.measureTo
+      // 同じ小節範囲なら古い順（必要なら desc に変えてOK）
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    })
+  }, [currentPart])
 
   const saveState = async (next: AppState) => {
     setState(next)
@@ -313,10 +324,10 @@ export default function NotesRoot() {
     setSelectedPart(ORCH_PARTS[0])
   }
 
-  const reorderConcert = async (concertId: string, dir: 'up'|'down') => {
+  const reorderConcert = async (concertId: string, dir: 'up' | 'down') => {
     if (!canEdit || DEMO) return
     const next = structuredClone(state)
-    const idx = next.concerts.findIndex(c=>c.id===concertId)
+    const idx = next.concerts.findIndex((c) => c.id === concertId)
     if (idx === -1) return
     const to = dir === 'up' ? idx - 1 : idx + 1
     if (to < 0 || to >= next.concerts.length) return
@@ -325,12 +336,12 @@ export default function NotesRoot() {
     await saveState(next)
   }
 
-  const reorderPiece = async (pieceId: string, dir: 'up'|'down') => {
+  const reorderPiece = async (pieceId: string, dir: 'up' | 'down') => {
     if (!canEdit || DEMO) return
     const next = structuredClone(state)
-    const c = next.concerts.find(c=>c.id===currentConcert.id)
+    const c = next.concerts.find((c) => c.id === currentConcert.id)
     if (!c) return
-    const idx = c.pieces.findIndex(p=>p.id===pieceId)
+    const idx = c.pieces.findIndex((p) => p.id === pieceId)
     if (idx === -1) return
     const to = dir === 'up' ? idx - 1 : idx + 1
     if (to < 0 || to >= c.pieces.length) return
@@ -342,7 +353,9 @@ export default function NotesRoot() {
   const rightLabel = DEMO
     ? 'Demo（閲覧専用）'
     : appMode === 'editor'
-    ? canEdit ? `${me?.displayName || 'Editor'}（編集可）` : `${me?.displayName || 'Editor'}（閲覧専用）`
+    ? canEdit
+      ? `${me?.displayName || 'Editor'}（編集可）`
+      : `${me?.displayName || 'Editor'}（閲覧専用）`
     : '閲覧モード'
 
   return (
@@ -355,14 +368,30 @@ export default function NotesRoot() {
         onChangeConcert={setSelectedConcertId}
         onChangePiece={setSelectedPieceId}
         onChangePart={setSelectedPart}
-        onAddConcert={() => { addConcert() }}
-        onAddPiece={() => { addPiece() }}
-        onRenameConcert={(id, title) => { renameConcert(id, title) }}
-        onRenamePiece={(id, title) => { renamePiece(id, title) }}
-        onDeleteConcert={(id) => { deleteConcert(id) }}
-        onDeletePiece={(id) => { deletePiece(id) }}
-        onReorderConcert={(id, dir) => { reorderConcert(id, dir) }}
-        onReorderPiece={(id, dir) => { reorderPiece(id, dir) }}
+        onAddConcert={() => {
+          addConcert()
+        }}
+        onAddPiece={() => {
+          addPiece()
+        }}
+        onRenameConcert={(id, title) => {
+          renameConcert(id, title)
+        }}
+        onRenamePiece={(id, title) => {
+          renamePiece(id, title)
+        }}
+        onDeleteConcert={(id) => {
+          deleteConcert(id)
+        }}
+        onDeletePiece={(id) => {
+          deletePiece(id)
+        }}
+        onReorderConcert={(id, dir) => {
+          reorderConcert(id, dir)
+        }}
+        onReorderPiece={(id, dir) => {
+          reorderPiece(id, dir)
+        }}
         canEdit={canEdit}
       />
       <div className="max-w-5xl mx-auto p-4">
@@ -386,10 +415,14 @@ export default function NotesRoot() {
         ) : (
           <>
             <NotesList
-              notes={currentPart.notes}
+              notes={sortedNotes}
               canEdit={canEdit}
-              onAdd={(partial) => { addNote(partial) }}
-              onDelete={(noteId) => { deleteNote(noteId) }}
+              onAdd={(partial) => {
+                addNote(partial)
+              }}
+              onDelete={(noteId) => {
+                deleteNote(noteId)
+              }}
             />
             {!canEdit && (
               <p className="mt-4 text-xs text-gray-500">

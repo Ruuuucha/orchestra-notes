@@ -1,9 +1,15 @@
 import { HashRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import NotesRoot from './pages/NotesRoot'     
-import SheetPage from './pages/SheetPage' 
+
+import NotesRoot from './pages/NotesRoot'
+import SheetPage from './pages/SheetPage'
 import PracticePage from './pages/PracticePage'
-import AuthGate from './pages/AuthGate'  
+import AuthGate from './pages/AuthGate'
+import MemoPage from './pages/MemoPage'
+
+// 起動時の絵文字演出
+import OrchestraEmojiFloat from './components/OrchestraEmojiFloat'
+
 /**
  * 要件：
  * - URLを開いた直後は「閲覧 or 編集」の選択"だけ"を見せる
@@ -15,7 +21,6 @@ import AuthGate from './pages/AuthGate'
 function ModeSelect() {
   const navigate = useNavigate()
 
-  // 初回表示は「選択だけ」。選んだらランチャーへ。
   const chooseGuest = () => {
     localStorage.setItem('appMode', 'guest')
     navigate('/app', { replace: true })
@@ -29,26 +34,35 @@ function ModeSelect() {
   useEffect(() => {
     const saved = localStorage.getItem('appMode')
     if (saved === 'guest') navigate('/app', { replace: true })
-    // editor は認証状態もあるので /auth へ誘導
+    // editor は認証状態もあるので /auth へ誘導（現状は /app に行かせる運用）
     if (saved === 'editor') navigate('/app', { replace: true })
   }, [navigate])
 
   return (
-    <div style={{ minHeight: '100vh', display:'grid', placeItems:'center', background:'#f9fafb', padding:24 }}>
-      <div style={{
-        width:'100%', maxWidth: 560, background:'#fff', border:'1px solid #e5e7eb',
-        borderRadius:16, padding:20
-      }}>
-        <h1 style={{ fontSize:22, fontWeight:800, marginBottom:12 }}>Orchestra App</h1>
-        <p style={{ color:'#6b7280', marginBottom:16 }}>はじめにモードを選んでください。</p>
+    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f9fafb', padding: 24 }}>
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 560,
+          background: '#fff',
+          border: '1px solid #e5e7eb',
+          borderRadius: 16,
+          padding: 20,
+        }}
+      >
+        <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 12 }}>Orchestra App</h1>
+        <p style={{ color: '#6b7280', marginBottom: 16 }}>はじめにモードを選んでください。</p>
 
-        <div style={{ display:'grid', gap:10 }}>
+        <div style={{ display: 'grid', gap: 10 }}>
           <button
             onClick={chooseEditor}
             style={{
-              padding:'12px 14px', borderRadius:12,
-              background:'#e0f2fe', border:'1px solid #bae6fd',
-              color:'#075985', fontWeight:800
+              padding: '12px 14px',
+              borderRadius: 12,
+              background: '#e0f2fe',
+              border: '1px solid #bae6fd',
+              color: '#075985',
+              fontWeight: 800,
             }}
           >
             編集者として入る（ログイン/申請）
@@ -56,16 +70,19 @@ function ModeSelect() {
           <button
             onClick={chooseGuest}
             style={{
-              padding:'12px 14px', borderRadius:12,
-              background:'#f3f4f6', border:'1px solid #e5e7eb',
-              color:'#374151', fontWeight:800
+              padding: '12px 14px',
+              borderRadius: 12,
+              background: '#f3f4f6',
+              border: '1px solid #e5e7eb',
+              color: '#374151',
+              fontWeight: 800,
             }}
           >
             閲覧で入る（編集不可）
           </button>
         </div>
 
-        <div style={{ marginTop:12, fontSize:12, color:'#6b7280' }}>
+        <div style={{ marginTop: 12, fontSize: 12, color: '#6b7280' }}>
           ※ 編集可否は後から「/app」の右上バッジで変更できます。
         </div>
       </div>
@@ -97,17 +114,33 @@ function AppHub() {
   const fg = mode === 'editor' ? '#065f46' : mode === 'guest' ? '#374151' : '#9f1239'
 
   return (
-    <div style={{ minHeight:'100vh', background:'#f9fafb', padding:24 }}>
-      <div style={{ maxWidth:960, margin:'0 auto' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:12 }}>
-          <h1 style={{ fontSize:26, fontWeight:800, margin:0 }}>Orchestra App</h1>
-          <div style={{ marginLeft:'auto' }}>
-            <span style={{ display:'inline-flex', alignItems:'center', gap:8, padding:'6px 10px',
-              borderRadius:999, background:bg, color:fg, fontWeight:700 }}>
+    <div style={{ minHeight: '100vh', background: '#f9fafb', padding: 24 }}>
+      <div style={{ maxWidth: 960, margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0 }}>Orchestra App</h1>
+          <div style={{ marginLeft: 'auto' }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '6px 10px',
+                borderRadius: 999,
+                background: bg,
+                color: fg,
+                fontWeight: 700,
+              }}
+            >
               {label}
               <button
                 onClick={changeMode}
-                style={{ border:'1px solid #e5e7eb', background:'#fff', borderRadius:8, padding:'2px 8px', fontWeight:700 }}
+                style={{
+                  border: '1px solid #e5e7eb',
+                  background: '#fff',
+                  borderRadius: 8,
+                  padding: '2px 8px',
+                  fontWeight: 700,
+                }}
               >
                 変更
               </button>
@@ -115,64 +148,28 @@ function AppHub() {
           </div>
         </div>
 
-        <p style={{ color:'#6b7280', marginBottom:16 }}>モジュールを選択してください。</p>
+        <p style={{ color: '#6b7280', marginBottom: 16 }}>モジュールを選択してください。</p>
 
-        <div style={{ display:'grid', gap:16, gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))' }}>
-          <button
-            onClick={() => open('/notes')}
-            style={{ 
-              display:'block', 
-              borderRadius:16, 
-              border:'1px solid #e5e7eb', 
-              padding:16, 
-              background:'#fff', 
-              textDecoration:'none', 
-              color:'inherit',
-              textAlign: 'left',
-              cursor: 'pointer',
-              width: '100%'
-            }}
-          >
-            <div style={{ fontWeight:700, fontSize:18, marginBottom:4 }}>Orchestra Notes</div>
-            <div style={{ color:'#6b7280', fontSize:14 }}>曲・パートごとの注意点（従来UI）</div>
+        <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          <button onClick={() => open('/notes')} style={cardStyle}>
+            <div style={cardTitle}>Orchestra Notes</div>
+            <div style={cardDesc}>曲・パートごとの注意点（従来UI）</div>
           </button>
 
-          <button
-            onClick={() => open('/sheet')}
-            style={{ 
-              display:'block', 
-              borderRadius:16, 
-              border:'1px solid #e5e7eb', 
-              padding:16, 
-              background:'#fff', 
-              textDecoration:'none', 
-              color:'inherit',
-              textAlign: 'left',
-              cursor: 'pointer',
-              width: '100%'
-            }}
-          >
-            <div style={{ fontWeight:700, fontSize:18, marginBottom:4 }}>Orchestra Sheet</div>
-            <div style={{ color:'#6b7280', fontSize:14 }}>スコア/音源・パート譜・ボウイングのリンク</div>
+          <button onClick={() => open('/sheet')} style={cardStyle}>
+            <div style={cardTitle}>Orchestra Sheet</div>
+            <div style={cardDesc}>スコア/音源・パート譜・ボウイングのリンク</div>
           </button>
 
-          <button
-            onClick={() => open('/practice')}
-            style={{ 
-              display:'block', 
-              borderRadius:16, 
-              border:'1px solid #e5e7eb', 
-              padding:16, 
-              background:'#fff', 
-              textDecoration:'none', 
-              color:'inherit',
-              textAlign: 'left',
-              cursor: 'pointer',
-              width: '100%'
-            }}
-          >
-            <div style={{ fontWeight:700, fontSize:18, marginBottom:4 }}>Orchestra Practice</div>
-            <div style={{ color:'#6b7280', fontSize:14 }}>練習会：日程/時間/会場 → パート → 座席</div>
+          <button onClick={() => open('/practice')} style={cardStyle}>
+            <div style={cardTitle}>Orchestra Practice</div>
+            <div style={cardDesc}>練習会：日程/時間/会場 → パート → 座席</div>
+          </button>
+
+          {/* ★ 追加：変更点メモ */}
+          <button onClick={() => open('/memo')} style={cardStyle}>
+            <div style={cardTitle}>Orchestra Memo</div>
+            <div style={cardDesc}>ボウイング等の変更を時系列で記録</div>
           </button>
         </div>
       </div>
@@ -180,27 +177,51 @@ function AppHub() {
   )
 }
 
+const cardStyle = {
+  display: 'block',
+  borderRadius: 16,
+  border: '1px solid #e5e7eb',
+  padding: 16,
+  background: '#fff',
+  textDecoration: 'none',
+  color: 'inherit',
+  textAlign: 'left' as const,
+  cursor: 'pointer',
+  width: '100%',
+}
+
+const cardTitle = { fontWeight: 700, fontSize: 18, marginBottom: 4 }
+const cardDesc = { color: '#6b7280', fontSize: 14 }
+
 export default function App() {
   return (
-    <HashRouter>
-      <Routes>
-        {/* 1. 最初に必ずモード選択（閲覧/編集） */}
-        <Route path="/" element={<ModeSelect />} />
+    <>
+      {/* 起動時の演出（URLを開いた時に1回だけ） */}
+      <OrchestraEmojiFloat durationMs={2600} count={18} />
 
-        {/* 2. 編集者は /auth でログイン/申請（完了時に localStorage.appMode='editor' をセットして /app へ） */}
-        <Route path="/auth" element={<AuthGate />} />
+      <HashRouter>
+        <Routes>
+          {/* 1. 最初に必ずモード選択（閲覧/編集） */}
+          <Route path="/" element={<ModeSelect />} />
 
-        {/* 3. ランチャー（ここから各アプリへ分岐） */}
-        <Route path="/app" element={<AppHub />} />
+          {/* 2. 編集者は /auth でログイン/申請（完了時に localStorage.appMode='editor' をセットして /app へ） */}
+          <Route path="/auth" element={<AuthGate />} />
 
-        {/* 4. 各アプリ */}
-        <Route path="/notes" element={<NotesRoot />} />
-        <Route path="/sheet" element={<SheetPage />} />
-        <Route path="/practice" element={<PracticePage />} />
+          {/* 3. ランチャー（ここから各アプリへ分岐） */}
+          <Route path="/app" element={<AppHub />} />
 
-        {/* 迷子はトップ（選択画面）へ */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </HashRouter>
+          {/* 4. 各アプリ */}
+          <Route path="/notes" element={<NotesRoot />} />
+          <Route path="/sheet" element={<SheetPage />} />
+          <Route path="/practice" element={<PracticePage />} />
+
+          {/* 5. 変更点メモ */}
+          <Route path="/memo" element={<MemoPage />} />
+
+          {/* 迷子はトップ（選択画面）へ */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </HashRouter>
+    </>
   )
 }
